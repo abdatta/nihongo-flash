@@ -461,6 +461,40 @@ const getCardPriority = (card, stats, direction, now) => {
   return { score, isDue, isNew, accuracy, directionStats };
 };
 
+const getCardStrengthMeta = (directionStats) => {
+  if (!directionStats || directionStats.reviews === 0) {
+    return {
+      bucket: 'new',
+      label: 'New',
+      classes: 'bg-sky-500/15 text-sky-300 border border-sky-400/25',
+    };
+  }
+
+  const accuracy = getAccuracy(directionStats);
+
+  if (accuracy < 0.6 || directionStats.streak < 0) {
+    return {
+      bucket: 'weak',
+      label: 'Weak',
+      classes: 'bg-rose-500/15 text-rose-300 border border-rose-400/25',
+    };
+  }
+
+  if (accuracy > 0.8 && directionStats.streak >= 3) {
+    return {
+      bucket: 'strong',
+      label: 'Strong',
+      classes: 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/25',
+    };
+  }
+
+  return {
+    bucket: 'improving',
+    label: 'Improving',
+    classes: 'bg-amber-500/15 text-amber-300 border border-amber-400/25',
+  };
+};
+
 const buildAdaptiveQueue = (activePool, stats, direction, sessionSize = 15) => {
   const now = Date.now();
   const rankedCards = activePool
@@ -671,7 +705,7 @@ const getCardThemeClasses = (type, assessedState, revealed) => {
   return `${bgClass} ${borderClass}`;
 };
 
-const Flashcard = ({ card, direction, onAssess, onPlaySound, onTriggerHaptics }) => {
+const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onTriggerHaptics }) => {
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
   const clearPadRef = useRef(null);
@@ -701,15 +735,21 @@ const Flashcard = ({ card, direction, onAssess, onPlaySound, onTriggerHaptics })
 
   const promptText = direction === 'r2k' ? card.romaji : card.char;
   const answerText = direction === 'r2k' ? card.char : card.romaji;
+  const strengthMeta = getCardStrengthMeta(directionStats);
   
   // Specific rendering for Romaji -> Kana (includes drawing pad)
   if (direction === 'r2k') {
     return (
       <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-6 shadow-2xl transition-all duration-300 relative overflow-hidden`}>
         <div className="text-center mb-4 flex flex-col items-center min-h-[110px] justify-end">
-          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-auto ${getTypeBadgeClasses(card.type)}`}>
-            {card.type}
-          </span>
+          <div className="mb-auto flex flex-wrap items-center justify-center gap-2">
+            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
+              {card.type}
+            </span>
+            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>
+              {strengthMeta.label}
+            </span>
+          </div>
           {revealed ? (
             <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
               <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
@@ -760,9 +800,14 @@ const Flashcard = ({ card, direction, onAssess, onPlaySound, onTriggerHaptics })
   return (
     <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-8 shadow-2xl transition-all duration-300 min-h-[320px] relative overflow-hidden`}>
         <div className="text-center flex-1 flex flex-col items-center justify-center relative">
-          <span className={`absolute top-0 px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
-            {card.type}
-          </span>
+          <div className="absolute top-0 flex flex-wrap items-center justify-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
+              {card.type}
+            </span>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>
+              {strengthMeta.label}
+            </span>
+          </div>
           
           <div className="relative w-full h-32 flex items-center justify-center mt-4">
              <h2 className={`text-8xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-0 scale-90 translate-y-4' : 'opacity-100 scale-100 translate-y-0'}`}>
@@ -877,6 +922,7 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
           key={queue[currentIndex].id} // Force remount on change for clean state
           card={queue[currentIndex]} 
           direction={direction} 
+          directionStats={getScheduledDirectionStats(stats, queue[currentIndex].id, direction)}
           onAssess={handleAssess}
           onPlaySound={onPlaySound}
           onTriggerHaptics={onTriggerHaptics}
@@ -894,18 +940,15 @@ const StatsView = ({ stats, allItems }) => {
     let improving = [];
 
     allItems.forEach(item => {
-      const itemOverallStats = stats[item.id];
-      if (!itemOverallStats) return;
+      const itemStat = getScheduledDirectionStats(stats, item.id, direction);
+      if (itemStat.reviews === 0) return;
 
-      const itemStat = itemOverallStats[direction];
-      if (!itemStat || (itemStat.gotIt === 0 && itemStat.missed === 0)) return;
+      const ratio = getAccuracy(itemStat);
+      const strengthMeta = getCardStrengthMeta(itemStat);
 
-      const total = itemStat.gotIt + itemStat.missed;
-      const ratio = itemStat.gotIt / total;
-
-      if (ratio < 0.6 || itemStat.streak < 0) {
+      if (strengthMeta.bucket === 'weak') {
         weak.push({ ...item, ...itemStat, ratio });
-      } else if (ratio > 0.8 && itemStat.streak >= 3) {
+      } else if (strengthMeta.bucket === 'strong') {
         strong.push({ ...item, ...itemStat, ratio });
       } else {
         improving.push({ ...item, ...itemStat, ratio });
@@ -1243,7 +1286,7 @@ export default function App() {
               <div className={`transition-all duration-300 ${isActive ? 'text-emerald-400 -translate-y-1' : 'text-zinc-500 hover:text-zinc-300'}`}>
                 <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
               </div>
-              <span className={`text-[10px] font-bold mt-1 transition-all duration-300 ${isActive ? 'text-emerald-400 opacity-100' : 'text-zinc-500 opacity-0 translate-y-2'}`}>
+              <span className={`text-[10px] font-bold mt-1 transition-all duration-300 ${isActive ? 'text-emerald-400' : 'text-zinc-500'}`}>
                 {tab.label}
               </span>
               {isActive && (
