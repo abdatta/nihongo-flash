@@ -1,5 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
+import HomePage from './pages/HomePage';
+import WritePage from './pages/WritePage';
+import StatsPage from './pages/StatsPage';
+import SettingsPage from './pages/SettingsPage';
 
 const STATS_STORAGE_KEY = 'nihongo-flash:stats';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -9,6 +13,57 @@ const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
 const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
 
 const NOISE_BUFFER_CACHE = new WeakMap();
+
+const NAV_PAGES = [
+  { id: 'home', label: 'Home', icon: BookOpen, href: '#/', title: 'Read' },
+  { id: 'write', label: 'Write', icon: Edit3, href: '#/write', title: 'Write' },
+  { id: 'stats', label: 'Stats', icon: BarChart2, href: '#/stats', title: 'Stats' },
+  { id: 'settings', label: 'Settings', icon: Settings, href: '#/settings', title: 'Settings' },
+];
+
+const normalizePageFromHash = (hash) => {
+  const normalizedHash = typeof hash === 'string' ? hash.trim() : '';
+  const route = normalizedHash.replace(/^#/, '') || '/';
+  const pathname = route.startsWith('/') ? route : `/${route}`;
+
+  switch (pathname) {
+    case '/':
+    case '/read':
+      return 'home';
+    case '/write':
+      return 'write';
+    case '/stats':
+      return 'stats';
+    case '/settings':
+      return 'settings';
+    default:
+      return 'home';
+  }
+};
+
+const useActivePage = () => {
+  const [activePage, setActivePage] = useState(() => {
+    if (typeof window === 'undefined') return 'home';
+    return normalizePageFromHash(window.location.hash);
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const syncPage = () => {
+      setActivePage(normalizePageFromHash(window.location.hash));
+    };
+
+    syncPage();
+    window.addEventListener('hashchange', syncPage);
+
+    return () => {
+      window.removeEventListener('hashchange', syncPage);
+    };
+  }, []);
+
+  return activePage;
+};
 
 const createEmptyDirectionStats = () => ({
   gotIt: 0,
@@ -1235,7 +1290,7 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapt
 // --- MAIN APP COMPONENT ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('k2r');
+  const activePage = useActivePage();
   const [settings, setSettings] = useState({
     hiragana: true,
     katakana: true,
@@ -1335,12 +1390,13 @@ export default function App() {
     }
   }, [settings.hapticsEnabled]);
 
-  const tabs = [
-    { id: 'k2r', label: 'Read', icon: BookOpen },
-    { id: 'r2k', label: 'Write', icon: Edit3 },
-    { id: 'stats', label: 'Stats', icon: BarChart2 },
-    { id: 'settings', label: 'Settings', icon: Settings },
-  ];
+  const practiceSessionProps = {
+    activePool,
+    stats,
+    onUpdateStats: updateStats,
+    onPlaySound: playFeedbackSound,
+    onTriggerHaptics: triggerHaptics,
+  };
 
   return (
     <div className="flex flex-col h-screen max-w-2xl mx-auto bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 overflow-hidden relative shadow-2xl">
@@ -1352,31 +1408,18 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden relative flex flex-col bg-[#09090b]">
-        {activeTab === 'r2k' && (
-          <PracticeSession 
-            activePool={activePool} 
-            direction="r2k" 
-            stats={stats}
-            onUpdateStats={updateStats}
-            onPlaySound={playFeedbackSound}
-            onTriggerHaptics={triggerHaptics}
-          />
+        {activePage === 'write' && (
+          <WritePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
-        {activeTab === 'k2r' && (
-          <PracticeSession 
-            activePool={activePool} 
-            direction="k2r" 
-            stats={stats}
-            onUpdateStats={updateStats}
-            onPlaySound={playFeedbackSound}
-            onTriggerHaptics={triggerHaptics}
-          />
+        {activePage === 'home' && (
+          <HomePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
-        {activeTab === 'stats' && (
-          <StatsView stats={stats} allItems={allItems} />
+        {activePage === 'stats' && (
+          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} />
         )}
-        {activeTab === 'settings' && (
-          <SettingsView
+        {activePage === 'settings' && (
+          <SettingsPage
+            SettingsViewComponent={SettingsView}
             settings={settings}
             setSettings={setSettings}
             customItems={customItems}
@@ -1388,13 +1431,13 @@ export default function App() {
 
       {/* Bottom Navigation */}
       <nav className="absolute bottom-0 left-0 right-0 h-20 bg-zinc-950/90 backdrop-blur-lg border-t border-zinc-900 flex justify-around items-center px-4 pb-safe z-50">
-        {tabs.map(tab => {
+        {NAV_PAGES.map(tab => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
+          const isActive = activePage === tab.id;
           return (
-            <button
+            <a
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              href={tab.href}
               className="flex flex-col items-center justify-center w-16 h-14 relative"
             >
               <div className={`transition-all duration-300 ${isActive ? 'text-emerald-400 -translate-y-1' : 'text-zinc-500 hover:text-zinc-300'}`}>
@@ -1406,7 +1449,7 @@ export default function App() {
               {isActive && (
                 <div className="absolute -bottom-2 w-1 h-1 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
               )}
-            </button>
+            </a>
           );
         })}
       </nav>
