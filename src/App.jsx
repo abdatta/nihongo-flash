@@ -99,6 +99,15 @@ const HAPTIC_PATTERNS = {
   missed: [28, 36, 20],
 };
 
+const isLikelyHapticsSupported = () => {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || '';
+  return /Android/i.test(userAgent);
+};
+
 const getNoiseBuffer = (audioContext) => {
   const cached = NOISE_BUFFER_CACHE.get(audioContext);
   if (cached) return cached;
@@ -1046,7 +1055,7 @@ const StatsView = ({ stats, allItems }) => {
   );
 };
 
-const SettingsView = ({ settings, setSettings, customItems, setCustomItems }) => {
+const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapticsSupported }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [newItemChar, setNewItemChar] = useState('');
   const [newItemRomaji, setNewItemRomaji] = useState('');
@@ -1095,7 +1104,9 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems }) =>
       <div className="mb-8">
         <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Sound</h3>
         <Toggle label="Practice Sounds" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
-        <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
+        {hapticsSupported && (
+          <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
+        )}
       </div>
 
       <div>
@@ -1167,6 +1178,7 @@ export default function App() {
   });
   const [customItems, setCustomItems] = useState(DEFAULT_KANJI);
   const audioContextRef = useRef(null);
+  const hapticsSupported = useMemo(() => isLikelyHapticsSupported(), []);
   
   // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
   const [stats, setStats] = useState(() => loadStoredStats());
@@ -1222,7 +1234,7 @@ export default function App() {
   }, [settings.soundEnabled]);
 
   const triggerHaptics = useCallback((effectName) => {
-    if (!settings.hapticsEnabled || typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+    if (!settings.hapticsEnabled || !hapticsSupported) {
       return;
     }
 
@@ -1230,7 +1242,7 @@ export default function App() {
     if (!pattern) return;
 
     navigator.vibrate(pattern);
-  }, [settings.hapticsEnabled]);
+  }, [hapticsSupported, settings.hapticsEnabled]);
 
   useEffect(() => {
     try {
@@ -1297,11 +1309,12 @@ export default function App() {
           <StatsView stats={stats} allItems={allItems} />
         )}
         {activeTab === 'settings' && (
-          <SettingsView 
-            settings={settings} 
-            setSettings={setSettings} 
-            customItems={customItems} 
-            setCustomItems={setCustomItems} 
+          <SettingsView
+            settings={settings}
+            setSettings={setSettings}
+            customItems={customItems}
+            setCustomItems={setCustomItems}
+            hapticsSupported={hapticsSupported}
           />
         )}
       </div>
