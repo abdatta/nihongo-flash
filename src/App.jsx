@@ -1,6 +1,192 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
 
+const STATS_STORAGE_KEY = 'nihongo-flash:stats';
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const MIN_EASE = 1.3;
+const DEFAULT_EASE = 2.5;
+
+const createEmptyDirectionStats = () => ({
+  gotIt: 0,
+  missed: 0,
+  streak: 0,
+  reviews: 0,
+  ease: DEFAULT_EASE,
+  intervalDays: 0,
+  lastReviewedAt: null,
+  dueAt: 0,
+});
+
+const normalizeStats = (storedStats) => {
+  if (!storedStats || typeof storedStats !== 'object' || Array.isArray(storedStats)) {
+    return {};
+  }
+
+  return Object.entries(storedStats).reduce((acc, [id, itemStats]) => {
+    if (!itemStats || typeof itemStats !== 'object' || Array.isArray(itemStats)) {
+      return acc;
+    }
+
+    const normalizedDirections = ['k2r', 'r2k'].reduce((directions, direction) => {
+      const directionStats = itemStats[direction];
+      if (!directionStats || typeof directionStats !== 'object' || Array.isArray(directionStats)) {
+        return directions;
+      }
+
+      directions[direction] = {
+        gotIt: Number.isFinite(directionStats.gotIt) ? directionStats.gotIt : 0,
+        missed: Number.isFinite(directionStats.missed) ? directionStats.missed : 0,
+        streak: Number.isFinite(directionStats.streak) ? directionStats.streak : 0,
+        reviews: Number.isFinite(directionStats.reviews) ? directionStats.reviews : 0,
+        ease: Number.isFinite(directionStats.ease) ? Math.max(MIN_EASE, directionStats.ease) : DEFAULT_EASE,
+        intervalDays: Number.isFinite(directionStats.intervalDays) ? Math.max(0, directionStats.intervalDays) : 0,
+        lastReviewedAt: Number.isFinite(directionStats.lastReviewedAt) ? directionStats.lastReviewedAt : null,
+        dueAt: Number.isFinite(directionStats.dueAt) ? directionStats.dueAt : 0,
+      };
+
+      return directions;
+    }, {});
+
+    if (Object.keys(normalizedDirections).length > 0) {
+      acc[id] = normalizedDirections;
+    }
+
+    return acc;
+  }, {});
+};
+
+const loadStoredStats = () => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const storedValue = window.localStorage.getItem(STATS_STORAGE_KEY);
+    if (!storedValue) return {};
+    return normalizeStats(JSON.parse(storedValue));
+  } catch {
+    return {};
+  }
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const getAccuracy = (directionStats) => {
+  const total = directionStats.gotIt + directionStats.missed;
+  return total === 0 ? 0.5 : directionStats.gotIt / total;
+};
+
+const getScheduledDirectionStats = (stats, cardId, direction) => {
+  const existing = stats[cardId]?.[direction];
+  return existing ? { ...createEmptyDirectionStats(), ...existing } : createEmptyDirectionStats();
+};
+
+const calculateNextDirectionStats = (currentDirectionStats, result, reviewedAt) => {
+  const isGotIt = result === 'gotIt';
+  const nextReviews = currentDirectionStats.reviews + 1;
+
+  if (!isGotIt) {
+    return {
+      ...currentDirectionStats,
+      gotIt: currentDirectionStats.gotIt,
+      missed: currentDirectionStats.missed + 1,
+      streak: -1,
+      reviews: nextReviews,
+      ease: Math.max(MIN_EASE, currentDirectionStats.ease - 0.2),
+      intervalDays: 0,
+      lastReviewedAt: reviewedAt,
+      dueAt: reviewedAt,
+    };
+  }
+
+  let nextIntervalDays = 1;
+  if (currentDirectionStats.reviews === 1) {
+    nextIntervalDays = 3;
+  } else if (currentDirectionStats.reviews >= 2) {
+    nextIntervalDays = Math.max(4, Math.round(Math.max(1, currentDirectionStats.intervalDays) * currentDirectionStats.ease));
+  }
+
+  return {
+    ...currentDirectionStats,
+    gotIt: currentDirectionStats.gotIt + 1,
+    missed: currentDirectionStats.missed,
+    streak: currentDirectionStats.streak + 1,
+    reviews: nextReviews,
+    ease: clamp(currentDirectionStats.ease + 0.1, MIN_EASE, 3.0),
+    intervalDays: nextIntervalDays,
+    lastReviewedAt: reviewedAt,
+    dueAt: reviewedAt + nextIntervalDays * DAY_IN_MS,
+  };
+};
+
+const getCardPriority = (card, stats, direction, now) => {
+  const directionStats = getScheduledDirectionStats(stats, card.id, direction);
+  const accuracy = getAccuracy(directionStats);
+  const isNew = directionStats.reviews === 0;
+  const isDue = isNew || directionStats.dueAt <= now;
+  const overdueDays = directionStats.dueAt ? Math.max(0, (now - directionStats.dueAt) / DAY_IN_MS) : 0;
+  const upcomingDays = directionStats.dueAt > now ? (directionStats.dueAt - now) / DAY_IN_MS : 0;
+
+  let score = 0;
+
+  if (isDue) {
+    score += 140;
+  } else {
+    score += Math.max(0, 35 - upcomingDays * 18);
+  }
+
+  score += overdueDays * 24;
+  score += (1 - accuracy) * 55;
+  score += directionStats.streak < 0 ? 18 : Math.max(0, 8 - directionStats.streak * 2);
+  score += directionStats.reviews < 2 ? 14 : 0;
+  score += isNew ? 22 : 0;
+  score += Math.random() * 12;
+
+  return { score, isDue, isNew, accuracy, directionStats };
+};
+
+const buildAdaptiveQueue = (activePool, stats, direction, sessionSize = 15) => {
+  const now = Date.now();
+  const rankedCards = activePool
+    .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
+    .sort((a, b) => b.score - a.score);
+
+  const dueCards = rankedCards.filter(entry => entry.isDue && !entry.isNew);
+  const newCards = rankedCards.filter(entry => entry.isNew);
+  const futureCards = rankedCards.filter(entry => !entry.isDue && !entry.isNew);
+
+  const maxNewCards = clamp(Math.ceil(sessionSize * 0.25), 2, 4);
+  const selected = [];
+  const selectedIds = new Set();
+
+  const takeCards = (entries, limit) => {
+    for (const entry of entries) {
+      if (selected.length >= sessionSize || limit <= 0) break;
+      if (selectedIds.has(entry.card.id)) continue;
+      selected.push(entry.card);
+      selectedIds.add(entry.card.id);
+      limit -= 1;
+    }
+    return limit;
+  };
+
+  let remainingNewSlots = Math.min(maxNewCards, newCards.length);
+  takeCards(dueCards, sessionSize - remainingNewSlots);
+  remainingNewSlots = takeCards(newCards, remainingNewSlots);
+
+  if (selected.length < sessionSize) {
+    takeCards(futureCards, sessionSize - selected.length);
+  }
+
+  if (selected.length < sessionSize && remainingNewSlots > 0) {
+    takeCards(newCards, remainingNewSlots);
+  }
+
+  if (selected.length < sessionSize) {
+    takeCards(rankedCards, sessionSize - selected.length);
+  }
+
+  return selected;
+};
+
 // --- DATA ---
 const HIRAGANA = [
   { id: 'h_a', char: 'あ', romaji: 'a', type: 'hiragana' }, { id: 'h_i', char: 'い', romaji: 'i', type: 'hiragana' }, { id: 'h_u', char: 'う', romaji: 'u', type: 'hiragana' }, { id: 'h_e', char: 'え', romaji: 'e', type: 'hiragana' }, { id: 'h_o', char: 'お', romaji: 'o', type: 'hiragana' },
@@ -297,18 +483,17 @@ const Flashcard = ({ card, direction, onAssess }) => {
   );
 };
 
-const PracticeSession = ({ activePool, direction, onUpdateStats }) => {
+const PracticeSession = ({ activePool, direction, stats, onUpdateStats }) => {
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
 
   const startSession = useCallback(() => {
-    // Shuffle and pick up to 15 cards for a session
-    const shuffled = [...activePool].sort(() => 0.5 - Math.random());
-    setQueue(shuffled.slice(0, 15));
+    // Prioritize due, weak, and new cards to support spaced repetition.
+    setQueue(buildAdaptiveQueue(activePool, stats, direction, 15));
     setCurrentIndex(0);
     setSessionActive(true);
-  }, [activePool]);
+  }, [activePool, stats, direction]);
 
   // Initial auto-start if pool is available
   useEffect(() => {
@@ -572,7 +757,7 @@ export default function App() {
   const [customItems, setCustomItems] = useState(DEFAULT_KANJI);
   
   // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
-  const [stats, setStats] = useState({});
+  const [stats, setStats] = useState(() => loadStoredStats());
 
   const allItems = useMemo(() => {
     return [
@@ -593,22 +778,26 @@ export default function App() {
   const updateStats = useCallback((id, result, direction) => {
     setStats(prev => {
       const currentOverall = prev[id] || {};
-      const currentDir = currentOverall[direction] || { gotIt: 0, missed: 0, streak: 0 };
-      const isGotIt = result === 'gotIt';
+      const currentDir = getScheduledDirectionStats(prev, id, direction);
+      const nextDir = calculateNextDirectionStats(currentDir, result, Date.now());
       
       return {
         ...prev,
         [id]: {
           ...currentOverall,
-          [direction]: {
-            gotIt: currentDir.gotIt + (isGotIt ? 1 : 0),
-            missed: currentDir.missed + (!isGotIt ? 1 : 0),
-            streak: isGotIt ? currentDir.streak + 1 : -1,
-          }
+          [direction]: nextDir,
         }
       };
     });
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(stats));
+    } catch {
+      // Ignore storage write failures so practice still works if storage is unavailable.
+    }
+  }, [stats]);
 
   const tabs = [
     { id: 'k2r', label: 'Read', icon: BookOpen },
@@ -631,6 +820,7 @@ export default function App() {
           <PracticeSession 
             activePool={activePool} 
             direction="r2k" 
+            stats={stats}
             onUpdateStats={updateStats}
           />
         )}
@@ -638,6 +828,7 @@ export default function App() {
           <PracticeSession 
             activePool={activePool} 
             direction="k2r" 
+            stats={stats}
             onUpdateStats={updateStats}
           />
         )}
