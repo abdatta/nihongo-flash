@@ -65,6 +65,49 @@ const useActivePage = () => {
   return activePage;
 };
 
+const useViewportHeightVar = () => {
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    let frameId = null;
+
+    const syncViewportHeight = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+        document.documentElement.style.setProperty('--app-height', `${viewportHeight}px`);
+        frameId = null;
+      });
+    };
+
+    syncViewportHeight();
+
+    const visualViewport = window.visualViewport;
+    window.addEventListener('resize', syncViewportHeight);
+    window.addEventListener('orientationchange', syncViewportHeight);
+    window.addEventListener('pageshow', syncViewportHeight);
+    visualViewport?.addEventListener('resize', syncViewportHeight);
+    visualViewport?.addEventListener('scroll', syncViewportHeight);
+
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      window.removeEventListener('resize', syncViewportHeight);
+      window.removeEventListener('orientationchange', syncViewportHeight);
+      window.removeEventListener('pageshow', syncViewportHeight);
+      visualViewport?.removeEventListener('resize', syncViewportHeight);
+      visualViewport?.removeEventListener('scroll', syncViewportHeight);
+    };
+  }, []);
+};
+
 const createEmptyDirectionStats = () => ({
   gotIt: 0,
   missed: 0,
@@ -1291,6 +1334,7 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapt
 
 export default function App() {
   const activePage = useActivePage();
+  useViewportHeightVar();
   const [settings, setSettings] = useState({
     hiragana: true,
     katakana: true,
@@ -1399,7 +1443,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-2xl mx-auto bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 overflow-hidden relative shadow-2xl">
+    <div className="app-shell flex flex-col max-w-2xl mx-auto bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 overflow-hidden relative shadow-2xl">
       
       {/* Header (optional, clean minimal bar) */}
       <div className="h-14 flex items-center justify-center border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md z-10 shrink-0">
