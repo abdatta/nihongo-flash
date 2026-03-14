@@ -1,0 +1,684 @@
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
+
+// --- DATA ---
+const HIRAGANA = [
+  { id: 'h_a', char: 'あ', romaji: 'a', type: 'hiragana' }, { id: 'h_i', char: 'い', romaji: 'i', type: 'hiragana' }, { id: 'h_u', char: 'う', romaji: 'u', type: 'hiragana' }, { id: 'h_e', char: 'え', romaji: 'e', type: 'hiragana' }, { id: 'h_o', char: 'お', romaji: 'o', type: 'hiragana' },
+  { id: 'h_ka', char: 'か', romaji: 'ka', type: 'hiragana' }, { id: 'h_ki', char: 'き', romaji: 'ki', type: 'hiragana' }, { id: 'h_ku', char: 'く', romaji: 'ku', type: 'hiragana' }, { id: 'h_ke', char: 'け', romaji: 'ke', type: 'hiragana' }, { id: 'h_ko', char: 'こ', romaji: 'ko', type: 'hiragana' },
+  { id: 'h_sa', char: 'さ', romaji: 'sa', type: 'hiragana' }, { id: 'h_shi', char: 'し', romaji: 'shi', type: 'hiragana' }, { id: 'h_su', char: 'す', romaji: 'su', type: 'hiragana' }, { id: 'h_se', char: 'せ', romaji: 'se', type: 'hiragana' }, { id: 'h_so', char: 'そ', romaji: 'so', type: 'hiragana' },
+  { id: 'h_ta', char: 'た', romaji: 'ta', type: 'hiragana' }, { id: 'h_chi', char: 'ち', romaji: 'chi', type: 'hiragana' }, { id: 'h_tsu', char: 'つ', romaji: 'tsu', type: 'hiragana' }, { id: 'h_te', char: 'て', romaji: 'te', type: 'hiragana' }, { id: 'h_to', char: 'と', romaji: 'to', type: 'hiragana' },
+  { id: 'h_na', char: 'な', romaji: 'na', type: 'hiragana' }, { id: 'h_ni', char: 'に', romaji: 'ni', type: 'hiragana' }, { id: 'h_nu', char: 'ぬ', romaji: 'nu', type: 'hiragana' }, { id: 'h_ne', char: 'ね', romaji: 'ne', type: 'hiragana' }, { id: 'h_no', char: 'の', romaji: 'no', type: 'hiragana' },
+  { id: 'h_ha', char: 'は', romaji: 'ha', type: 'hiragana' }, { id: 'h_hi', char: 'ひ', romaji: 'hi', type: 'hiragana' }, { id: 'h_fu', char: 'ふ', romaji: 'fu', type: 'hiragana' }, { id: 'h_he', char: 'へ', romaji: 'he', type: 'hiragana' }, { id: 'h_ho', char: 'ほ', romaji: 'ho', type: 'hiragana' },
+  { id: 'h_ma', char: 'ま', romaji: 'ma', type: 'hiragana' }, { id: 'h_mi', char: 'み', romaji: 'mi', type: 'hiragana' }, { id: 'h_mu', char: 'む', romaji: 'mu', type: 'hiragana' }, { id: 'h_me', char: 'め', romaji: 'me', type: 'hiragana' }, { id: 'h_mo', char: 'も', romaji: 'mo', type: 'hiragana' },
+  { id: 'h_ya', char: 'や', romaji: 'ya', type: 'hiragana' }, { id: 'h_yu', char: 'ゆ', romaji: 'yu', type: 'hiragana' }, { id: 'h_yo', char: 'よ', romaji: 'yo', type: 'hiragana' },
+  { id: 'h_ra', char: 'ら', romaji: 'ra', type: 'hiragana' }, { id: 'h_ri', char: 'り', romaji: 'ri', type: 'hiragana' }, { id: 'h_ru', char: 'る', romaji: 'ru', type: 'hiragana' }, { id: 'h_re', char: 'れ', romaji: 're', type: 'hiragana' }, { id: 'h_ro', char: 'ろ', romaji: 'ro', type: 'hiragana' },
+  { id: 'h_wa', char: 'わ', romaji: 'wa', type: 'hiragana' }, { id: 'h_wo', char: 'を', romaji: 'wo', type: 'hiragana' }, { id: 'h_n', char: 'ん', romaji: 'n', type: 'hiragana' }
+];
+
+const KATAKANA = [
+  { id: 'k_a', char: 'ア', romaji: 'a', type: 'katakana' }, { id: 'k_i', char: 'イ', romaji: 'i', type: 'katakana' }, { id: 'k_u', char: 'ウ', romaji: 'u', type: 'katakana' }, { id: 'k_e', char: 'エ', romaji: 'e', type: 'katakana' }, { id: 'k_o', char: 'オ', romaji: 'o', type: 'katakana' },
+  { id: 'k_ka', char: 'カ', romaji: 'ka', type: 'katakana' }, { id: 'k_ki', char: 'キ', romaji: 'ki', type: 'katakana' }, { id: 'k_ku', char: 'ク', romaji: 'ku', type: 'katakana' }, { id: 'k_ke', char: 'ケ', romaji: 'ke', type: 'katakana' }, { id: 'k_ko', char: 'コ', romaji: 'ko', type: 'katakana' },
+  { id: 'k_sa', char: 'サ', romaji: 'sa', type: 'katakana' }, { id: 'k_shi', char: 'シ', romaji: 'shi', type: 'katakana' }, { id: 'k_su', char: 'ス', romaji: 'su', type: 'katakana' }, { id: 'k_se', char: 'セ', romaji: 'se', type: 'katakana' }, { id: 'k_so', char: 'ソ', romaji: 'so', type: 'katakana' },
+  { id: 'k_ta', char: 'タ', romaji: 'ta', type: 'katakana' }, { id: 'k_chi', char: 'チ', romaji: 'chi', type: 'katakana' }, { id: 'k_tsu', char: 'ツ', romaji: 'tsu', type: 'katakana' }, { id: 'k_te', char: 'テ', romaji: 'te', type: 'katakana' }, { id: 'k_to', char: 'ト', romaji: 'to', type: 'katakana' },
+  { id: 'k_na', char: 'ナ', romaji: 'na', type: 'katakana' }, { id: 'k_ni', char: 'ニ', romaji: 'ni', type: 'katakana' }, { id: 'k_nu', char: 'ヌ', romaji: 'nu', type: 'katakana' }, { id: 'k_ne', char: 'ネ', romaji: 'ne', type: 'katakana' }, { id: 'k_no', char: 'ノ', romaji: 'no', type: 'katakana' },
+  { id: 'k_ha', char: 'ハ', romaji: 'ha', type: 'katakana' }, { id: 'k_hi', char: 'ヒ', romaji: 'hi', type: 'katakana' }, { id: 'k_fu', char: 'フ', romaji: 'fu', type: 'katakana' }, { id: 'k_he', char: 'ヘ', romaji: 'he', type: 'katakana' }, { id: 'k_ho', char: 'ホ', romaji: 'ho', type: 'katakana' },
+  { id: 'k_ma', char: 'マ', romaji: 'ma', type: 'katakana' }, { id: 'k_mi', char: 'ミ', romaji: 'mi', type: 'katakana' }, { id: 'k_mu', char: 'ム', romaji: 'mu', type: 'katakana' }, { id: 'k_me', char: 'メ', romaji: 'me', type: 'katakana' }, { id: 'k_mo', char: 'モ', romaji: 'mo', type: 'katakana' },
+  { id: 'k_ya', char: 'ヤ', romaji: 'ya', type: 'katakana' }, { id: 'k_yu', char: 'ユ', romaji: 'yu', type: 'katakana' }, { id: 'k_yo', char: 'ヨ', romaji: 'yo', type: 'katakana' },
+  { id: 'k_ra', char: 'ラ', romaji: 'ra', type: 'katakana' }, { id: 'k_ri', char: 'リ', romaji: 'ri', type: 'katakana' }, { id: 'k_ru', char: 'ル', romaji: 'ru', type: 'katakana' }, { id: 'k_re', char: 'レ', romaji: 're', type: 'katakana' }, { id: 'k_ro', char: 'ロ', romaji: 'ro', type: 'katakana' },
+  { id: 'k_wa', char: 'ワ', romaji: 'wa', type: 'katakana' }, { id: 'k_wo', char: 'ヲ', romaji: 'wo', type: 'katakana' }, { id: 'k_n', char: 'ン', romaji: 'n', type: 'katakana' }
+];
+
+const DEFAULT_KANJI = [
+  { id: 'kj_nihon', char: '日本', romaji: 'nihon', type: 'kanji' },
+  { id: 'kj_tokyo', char: '東京', romaji: 'tokyo', type: 'kanji' },
+  { id: 'kj_kyoto', char: '京都', romaji: 'kyoto', type: 'kanji' },
+  { id: 'kj_mizu', char: '水', romaji: 'mizu', type: 'kanji' },
+  { id: 'kj_hi', char: '火', romaji: 'hi', type: 'kanji' },
+  { id: 'kj_eki', char: '駅', romaji: 'eki', type: 'kanji' },
+];
+
+// --- COMPONENTS ---
+
+const DrawingPad = ({ onClearRef, disabled }) => {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+
+  useEffect(() => {
+    if (onClearRef) {
+      onClearRef.current = clearCanvas;
+    }
+  }, [onClearRef]);
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const getCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    
+    // Scale mapping for visual size vs internal resolution
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    if (e.touches && e.touches.length > 0) {
+      return {
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY
+      };
+    }
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const startDrawing = (e) => {
+    if (disabled) return;
+    e.preventDefault();
+    setIsDrawing(true);
+    const coords = getCoordinates(e);
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(coords.x, coords.y);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing || disabled) return;
+    e.preventDefault();
+    const coords = getCoordinates(e);
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.lineTo(coords.x, coords.y);
+    ctx.strokeStyle = '#e4e4e7'; // zinc-200
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+  };
+
+  return (
+    <div className="relative w-full aspect-square max-h-[200px] bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-inner">
+      <canvas
+        ref={canvasRef}
+        width={400} // internal resolution
+        height={400}
+        onMouseDown={startDrawing}
+        onMouseMove={draw}
+        onMouseUp={stopDrawing}
+        onMouseLeave={stopDrawing}
+        onTouchStart={startDrawing}
+        onTouchMove={draw}
+        onTouchEnd={stopDrawing}
+        className={`w-full h-full touch-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-crosshair'}`}
+        style={{ touchAction: 'none' }}
+      />
+      {!disabled && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); clearCanvas(); }}
+          className="absolute top-2 right-2 p-1.5 bg-zinc-800 text-zinc-400 rounded-md hover:bg-zinc-700 hover:text-zinc-200 transition-colors"
+        >
+          <RefreshCw size={16} />
+        </button>
+      )}
+    </div>
+  );
+};
+
+const getTypeBadgeClasses = (type) => {
+  switch (type) {
+    case 'hiragana': return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
+    case 'katakana': return 'bg-purple-500/20 text-purple-400 border border-purple-500/30';
+    case 'kanji': return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+    default: return 'bg-zinc-800 text-zinc-400 border border-zinc-700';
+  }
+};
+
+const getCardThemeClasses = (type, assessedState, revealed) => {
+  let bgClass = '';
+  let borderClass = '';
+
+  switch (type) {
+    case 'hiragana': 
+      bgClass = revealed ? 'bg-blue-900/40' : 'bg-blue-950/30'; 
+      borderClass = 'border-blue-900/50'; 
+      break;
+    case 'katakana': 
+      bgClass = revealed ? 'bg-purple-900/40' : 'bg-purple-950/30'; 
+      borderClass = 'border-purple-900/50'; 
+      break;
+    case 'kanji': 
+      bgClass = revealed ? 'bg-amber-900/40' : 'bg-amber-950/30'; 
+      borderClass = 'border-amber-900/50'; 
+      break;
+    default: 
+      bgClass = revealed ? 'bg-zinc-900' : 'bg-zinc-950'; 
+      borderClass = 'border-zinc-800'; 
+      break;
+  }
+
+  return `${bgClass} ${borderClass}`;
+};
+
+const Flashcard = ({ card, direction, onAssess }) => {
+  const [revealed, setRevealed] = useState(false);
+  const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
+  const clearPadRef = useRef(null);
+
+  // Reset state if card changes
+  useEffect(() => {
+    setRevealed(false);
+    setAssessedState(null);
+    if (clearPadRef.current) clearPadRef.current();
+  }, [card.id]);
+
+  const handleReveal = () => setRevealed(true);
+
+  const handleAssess = (result) => {
+    setAssessedState(result);
+    // Add a slight delay for visual feedback before telling parent to move on
+    setTimeout(() => {
+      onAssess(card, result);
+    }, 300);
+  };
+
+  const promptText = direction === 'r2k' ? card.romaji : card.char;
+  const answerText = direction === 'r2k' ? card.char : card.romaji;
+  
+  // Specific rendering for Romaji -> Kana (includes drawing pad)
+  if (direction === 'r2k') {
+    return (
+      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-6 shadow-2xl transition-all duration-300 relative overflow-hidden`}>
+        <div className="text-center mb-4 flex flex-col items-center min-h-[110px] justify-end">
+          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase mb-auto ${getTypeBadgeClasses(card.type)}`}>
+            {card.type}
+          </span>
+          {revealed ? (
+            <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
+              <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center mt-2 h-[84px]">
+              <h2 className="text-5xl font-bold text-zinc-100 leading-none">{promptText}</h2>
+            </div>
+          )}
+        </div>
+
+        <div className="mb-6 relative">
+          <DrawingPad onClearRef={clearPadRef} disabled={!!assessedState} />
+        </div>
+
+        {!revealed ? (
+          <button 
+            onClick={handleReveal}
+            className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md"
+          >
+            Reveal
+          </button>
+        ) : (
+          <div className="flex gap-3 animate-in slide-in-from-bottom-4 duration-300">
+             <button 
+              onClick={() => handleAssess('missed')}
+              disabled={!!assessedState}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+                ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
+            >
+              <X size={20} /> Missed
+            </button>
+            <button 
+              onClick={() => handleAssess('gotIt')}
+              disabled={!!assessedState}
+              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+                ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
+            >
+              <Check size={20} /> Got it
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Specific rendering for Kana -> Romaji (simple flip)
+  return (
+    <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-8 shadow-2xl transition-all duration-300 min-h-[320px] relative overflow-hidden`}>
+        <div className="text-center flex-1 flex flex-col items-center justify-center relative">
+          <span className={`absolute top-0 px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
+            {card.type}
+          </span>
+          
+          <div className="relative w-full h-32 flex items-center justify-center mt-4">
+             <h2 className={`text-8xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-0 scale-90 translate-y-4' : 'opacity-100 scale-100 translate-y-0'}`}>
+                {promptText}
+             </h2>
+             <h2 className={`text-6xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-110 -translate-y-4'}`}>
+                {answerText}
+             </h2>
+          </div>
+        </div>
+
+        <div className="mt-8">
+          {!revealed ? (
+            <button 
+              onClick={handleReveal}
+              className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md"
+            >
+              Reveal
+            </button>
+          ) : (
+            <div className="flex gap-3 animate-in fade-in duration-300">
+               <button 
+                onClick={() => handleAssess('missed')}
+                disabled={!!assessedState}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+                  ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
+              >
+                <X size={20} /> Missed
+              </button>
+              <button 
+                onClick={() => handleAssess('gotIt')}
+                disabled={!!assessedState}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+                  ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
+              >
+                <Check size={20} /> Got it
+              </button>
+            </div>
+          )}
+        </div>
+    </div>
+  );
+};
+
+const PracticeSession = ({ activePool, direction, onUpdateStats }) => {
+  const [queue, setQueue] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [sessionActive, setSessionActive] = useState(false);
+
+  const startSession = useCallback(() => {
+    // Shuffle and pick up to 15 cards for a session
+    const shuffled = [...activePool].sort(() => 0.5 - Math.random());
+    setQueue(shuffled.slice(0, 15));
+    setCurrentIndex(0);
+    setSessionActive(true);
+  }, [activePool]);
+
+  // Initial auto-start if pool is available
+  useEffect(() => {
+    if (activePool.length > 0 && !sessionActive && queue.length === 0) {
+      startSession();
+    }
+  }, [activePool, sessionActive, queue, startSession]);
+
+  const handleAssess = (card, result) => {
+    onUpdateStats(card.id, result, direction);
+    setCurrentIndex(prev => prev + 1);
+  };
+
+  if (activePool.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6 text-center">
+        <div className="max-w-xs text-zinc-400">
+          <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-20" />
+          <p>No cards available. Please enable categories in Settings or add custom items.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const isSessionComplete = currentIndex >= queue.length;
+
+  if (!sessionActive || isSessionComplete) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
+        <div className="w-24 h-24 bg-zinc-900 rounded-full flex items-center justify-center mb-6">
+          <Check className="w-12 h-12 text-emerald-500" />
+        </div>
+        <h2 className="text-3xl font-bold text-zinc-100 mb-2">Session Complete!</h2>
+        <p className="text-zinc-400 mb-8">Great job keeping up with your practice.</p>
+        <button 
+          onClick={startSession}
+          className="px-8 py-4 bg-zinc-100 text-zinc-950 rounded-full font-bold text-lg hover:bg-zinc-200 transition-colors shadow-lg flex items-center gap-2"
+        >
+          Start Next Session <ArrowRight size={20} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 overflow-y-auto pb-24 pt-6 px-4">
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+        <div className="w-full max-w-sm mb-6 flex items-center justify-between text-zinc-500 text-sm font-medium">
+           <span>Card {currentIndex + 1} of {queue.length}</span>
+           <div className="flex gap-1">
+             {queue.map((_, i) => (
+               <div key={i} className={`w-1.5 h-1.5 rounded-full ${i === currentIndex ? 'bg-zinc-100' : i < currentIndex ? 'bg-zinc-800' : 'bg-zinc-900'}`} />
+             ))}
+           </div>
+        </div>
+        <Flashcard 
+          key={queue[currentIndex].id} // Force remount on change for clean state
+          card={queue[currentIndex]} 
+          direction={direction} 
+          onAssess={handleAssess}
+        />
+      </div>
+    </div>
+  );
+};
+
+const StatsView = ({ stats, allItems }) => {
+  // Helper to compute weak/improving/strong based on a specific direction
+  const analyzeStats = (direction) => {
+    let weak = [];
+    let strong = [];
+    let improving = [];
+
+    allItems.forEach(item => {
+      const itemOverallStats = stats[item.id];
+      if (!itemOverallStats) return;
+
+      const itemStat = itemOverallStats[direction];
+      if (!itemStat || (itemStat.gotIt === 0 && itemStat.missed === 0)) return;
+
+      const total = itemStat.gotIt + itemStat.missed;
+      const ratio = itemStat.gotIt / total;
+
+      if (ratio < 0.6 || itemStat.streak < 0) {
+        weak.push({ ...item, ...itemStat, ratio });
+      } else if (ratio > 0.8 && itemStat.streak >= 3) {
+        strong.push({ ...item, ...itemStat, ratio });
+      } else {
+        improving.push({ ...item, ...itemStat, ratio });
+      }
+    });
+
+    return {
+      weak: weak.sort((a, b) => a.ratio - b.ratio),
+      improving: improving.sort((a, b) => b.ratio - a.ratio),
+      strong: strong.sort((a, b) => b.ratio - a.ratio)
+    };
+  };
+
+  const readingStats = useMemo(() => analyzeStats('k2r'), [stats, allItems]);
+  const writingStats = useMemo(() => analyzeStats('r2k'), [stats, allItems]);
+
+  const StatSection = ({ title, items, colorClass }) => (
+    <div className="mb-8">
+      <h4 className="text-xl font-bold text-zinc-100 mb-4 flex items-center justify-between">
+        {title} <span className="text-sm font-normal text-zinc-500">{items.length} items</span>
+      </h4>
+      {items.length === 0 ? (
+        <div className="text-zinc-600 bg-zinc-900/50 p-4 rounded-xl text-center text-sm">No items here yet.</div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {items.map(item => (
+            <div key={item.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col items-center justify-center min-w-[4.5rem]">
+               <span className="text-2xl font-bold text-zinc-100 mb-1">{item.char}</span>
+               <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex-1 overflow-y-auto pb-24 p-6">
+      <div className="flex items-center justify-between mb-8">
+        <h2 className="text-3xl font-bold text-zinc-100">Performance</h2>
+      </div>
+
+      <div className="mb-12">
+        <h3 className="text-2xl font-bold text-zinc-400 mb-6 border-b border-zinc-800 pb-3 flex items-center gap-2">
+          <BookOpen size={24} /> Reading Stats
+        </h3>
+        <StatSection title="Needs Work" items={readingStats.weak} colorClass="text-rose-400" />
+        <StatSection title="Improving" items={readingStats.improving} colorClass="text-amber-400" />
+        <StatSection title="Strong" items={readingStats.strong} colorClass="text-emerald-400" />
+      </div>
+      
+      <div>
+        <h3 className="text-2xl font-bold text-zinc-400 mb-6 border-b border-zinc-800 pb-3 flex items-center gap-2">
+          <Edit3 size={24} /> Writing Stats
+        </h3>
+        <StatSection title="Needs Work" items={writingStats.weak} colorClass="text-rose-400" />
+        <StatSection title="Improving" items={writingStats.improving} colorClass="text-amber-400" />
+        <StatSection title="Strong" items={writingStats.strong} colorClass="text-emerald-400" />
+      </div>
+    </div>
+  );
+};
+
+const SettingsView = ({ settings, setSettings, customItems, setCustomItems }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [newItemChar, setNewItemChar] = useState('');
+  const [newItemRomaji, setNewItemRomaji] = useState('');
+
+  const Toggle = ({ label, checked, onChange }) => (
+    <label className="flex items-center justify-between p-4 bg-zinc-900 rounded-2xl cursor-pointer hover:bg-zinc-800/80 transition-colors mb-3">
+      <span className="text-zinc-200 font-medium">{label}</span>
+      <div className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${checked ? 'bg-emerald-500' : 'bg-zinc-700'}`}>
+        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${checked ? 'translate-x-6' : 'translate-x-0'}`} />
+      </div>
+      <input type="checkbox" className="hidden" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+
+  const handleAddItem = (e) => {
+    e.preventDefault();
+    if (!newItemChar.trim() || !newItemRomaji.trim()) return;
+    
+    const newItem = {
+      id: `custom_${Date.now()}`,
+      char: newItemChar.trim(),
+      romaji: newItemRomaji.trim().toLowerCase(),
+      type: 'kanji' // Defaulting to kanji for custom, though words also work
+    };
+
+    setCustomItems(prev => [...prev, newItem]);
+    setNewItemChar('');
+    setNewItemRomaji('');
+  };
+
+  const removeCustomItem = (id) => {
+    setCustomItems(prev => prev.filter(item => item.id !== id));
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto pb-24 p-6">
+      <h2 className="text-3xl font-bold text-zinc-100 mb-8">Settings</h2>
+
+      <div className="mb-8">
+        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Active Categories</h3>
+        <Toggle label="Hiragana" checked={settings.hiragana} onChange={(val) => setSettings(s => ({ ...s, hiragana: val }))} />
+        <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
+        <Toggle label="Kanji / Words (Custom)" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-4 ml-2">
+          <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Custom Deck</h3>
+          <button 
+            onClick={() => setIsEditing(!isEditing)}
+            className="text-emerald-500 text-sm font-bold hover:text-emerald-400"
+          >
+            {isEditing ? 'Done' : 'Edit'}
+          </button>
+        </div>
+
+        {isEditing && (
+          <form onSubmit={handleAddItem} className="bg-zinc-900 p-4 rounded-2xl mb-4 flex gap-3">
+            <input 
+              type="text" 
+              placeholder="漢字" 
+              value={newItemChar}
+              onChange={(e) => setNewItemChar(e.target.value)}
+              className="w-1/3 bg-zinc-950 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 ring-emerald-500/50 border border-zinc-800"
+            />
+            <input 
+              type="text" 
+              placeholder="Romaji" 
+              value={newItemRomaji}
+              onChange={(e) => setNewItemRomaji(e.target.value)}
+              className="flex-1 bg-zinc-950 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 ring-emerald-500/50 border border-zinc-800"
+            />
+            <button type="submit" className="bg-emerald-500 text-white p-3 rounded-xl hover:bg-emerald-600 transition-colors">
+              <Plus size={20} />
+            </button>
+          </form>
+        )}
+
+        <div className="space-y-2">
+          {customItems.map(item => (
+            <div key={item.id} className="flex items-center justify-between bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800/50">
+               <div className="flex gap-4 items-baseline">
+                 <span className="text-2xl font-bold text-zinc-100">{item.char}</span>
+                 <span className="text-zinc-400">{item.romaji}</span>
+               </div>
+               {isEditing && (
+                 <button onClick={() => removeCustomItem(item.id)} className="text-rose-500 hover:text-rose-400 p-2">
+                   <Trash2 size={18} />
+                 </button>
+               )}
+            </div>
+          ))}
+          {customItems.length === 0 && (
+            <div className="text-center text-zinc-600 py-6">No custom items yet.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN APP COMPONENT ---
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('k2r');
+  const [settings, setSettings] = useState({
+    hiragana: true,
+    katakana: true,
+    kanji: true,
+  });
+  const [customItems, setCustomItems] = useState(DEFAULT_KANJI);
+  
+  // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
+  const [stats, setStats] = useState({});
+
+  const allItems = useMemo(() => {
+    return [
+      ...HIRAGANA,
+      ...KATAKANA,
+      ...customItems
+    ];
+  }, [customItems]);
+
+  const activePool = useMemo(() => {
+    let pool = [];
+    if (settings.hiragana) pool.push(...HIRAGANA);
+    if (settings.katakana) pool.push(...KATAKANA);
+    if (settings.kanji) pool.push(...customItems);
+    return pool;
+  }, [settings, customItems]);
+
+  const updateStats = useCallback((id, result, direction) => {
+    setStats(prev => {
+      const currentOverall = prev[id] || {};
+      const currentDir = currentOverall[direction] || { gotIt: 0, missed: 0, streak: 0 };
+      const isGotIt = result === 'gotIt';
+      
+      return {
+        ...prev,
+        [id]: {
+          ...currentOverall,
+          [direction]: {
+            gotIt: currentDir.gotIt + (isGotIt ? 1 : 0),
+            missed: currentDir.missed + (!isGotIt ? 1 : 0),
+            streak: isGotIt ? currentDir.streak + 1 : -1,
+          }
+        }
+      };
+    });
+  }, []);
+
+  const tabs = [
+    { id: 'k2r', label: 'Read', icon: BookOpen },
+    { id: 'r2k', label: 'Write', icon: Edit3 },
+    { id: 'stats', label: 'Stats', icon: BarChart2 },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ];
+
+  return (
+    <div className="flex flex-col h-screen max-w-2xl mx-auto bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 overflow-hidden relative shadow-2xl">
+      
+      {/* Header (optional, clean minimal bar) */}
+      <div className="h-14 flex items-center justify-center border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md z-10 shrink-0">
+         <h1 className="font-bold text-lg tracking-wide text-zinc-100">NIHONGO<span className="text-emerald-500">FLASH</span></h1>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-hidden relative flex flex-col bg-[#09090b]">
+        {activeTab === 'r2k' && (
+          <PracticeSession 
+            activePool={activePool} 
+            direction="r2k" 
+            onUpdateStats={updateStats}
+          />
+        )}
+        {activeTab === 'k2r' && (
+          <PracticeSession 
+            activePool={activePool} 
+            direction="k2r" 
+            onUpdateStats={updateStats}
+          />
+        )}
+        {activeTab === 'stats' && (
+          <StatsView stats={stats} allItems={allItems} />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsView 
+            settings={settings} 
+            setSettings={setSettings} 
+            customItems={customItems} 
+            setCustomItems={setCustomItems} 
+          />
+        )}
+      </div>
+
+      {/* Bottom Navigation */}
+      <nav className="absolute bottom-0 left-0 right-0 h-20 bg-zinc-950/90 backdrop-blur-lg border-t border-zinc-900 flex justify-around items-center px-4 pb-safe z-50">
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="flex flex-col items-center justify-center w-16 h-14 relative"
+            >
+              <div className={`transition-all duration-300 ${isActive ? 'text-emerald-400 -translate-y-1' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+              </div>
+              <span className={`text-[10px] font-bold mt-1 transition-all duration-300 ${isActive ? 'text-emerald-400 opacity-100' : 'text-zinc-500 opacity-0 translate-y-2'}`}>
+                {tab.label}
+              </span>
+              {isActive && (
+                <div className="absolute -bottom-2 w-1 h-1 bg-emerald-400 rounded-full shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+    </div>
+  );
+}
