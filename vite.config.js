@@ -6,8 +6,12 @@ const githubPagesBase =
   process.env.GITHUB_ACTIONS === 'true' && repositoryName
     ? `/${repositoryName}/`
     : '/';
+const appVersion = process.env.GITHUB_SHA || new Date().toISOString();
 
 export default defineConfig({
   base: githubPagesBase,
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [react()],
 });

@@ -855,7 +855,7 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
 const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySound, onTriggerHaptics }) => {
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [sessionActive, setSessionActive] = useState(false);
+  const [sessionActive, setSessionActive] = useState(() => activePool.length > 0);
 
   const startSession = useCallback(() => {
     // Prioritize due, weak, and new cards to support spaced repetition.
@@ -866,10 +866,17 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
 
   // Initial auto-start if pool is available
   useEffect(() => {
-    if (activePool.length > 0 && !sessionActive && queue.length === 0) {
+    if (activePool.length === 0) {
+      setQueue([]);
+      setCurrentIndex(0);
+      setSessionActive(false);
+      return;
+    }
+
+    if (queue.length === 0) {
       startSession();
     }
-  }, [activePool, sessionActive, queue, startSession]);
+  }, [activePool, queue.length, startSession]);
 
   const handleAssess = (card, result) => {
     onUpdateStats(card.id, result, direction);
@@ -887,7 +894,19 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
     );
   }
 
-  const isSessionComplete = currentIndex >= queue.length;
+  const isPreparingSession = activePool.length > 0 && queue.length === 0;
+  const isSessionComplete = queue.length > 0 && currentIndex >= queue.length;
+
+  if (isPreparingSession) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-6 text-center">
+        <div className="max-w-xs text-zinc-400">
+          <RefreshCw className="w-10 h-10 mx-auto mb-4 animate-spin text-zinc-600" />
+          <p>Preparing your session...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!sessionActive || isSessionComplete) {
     return (
