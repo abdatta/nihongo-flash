@@ -1216,9 +1216,9 @@ const StatsView = ({ stats, allItems }) => {
         </div>
       </div>
 
-      <StatSection title="Needs Work" items={activeStats.data.weak} colorClass="text-rose-400" />
-      <StatSection title="Improving" items={activeStats.data.improving} colorClass="text-amber-400" />
       <StatSection title="Strong" items={activeStats.data.strong} colorClass="text-emerald-400" />
+      <StatSection title="Improving" items={activeStats.data.improving} colorClass="text-amber-400" />
+      <StatSection title="Needs Work" items={activeStats.data.weak} colorClass="text-rose-400" />
     </div>
   );
 };
