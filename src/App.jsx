@@ -577,9 +577,10 @@ const DEFAULT_KANJI = [
 
 // --- COMPONENTS ---
 
-const DrawingPad = ({ onClearRef, disabled }) => {
+const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const hasDrawnRef = useRef(false);
 
   useEffect(() => {
     if (onClearRef) {
@@ -592,6 +593,8 @@ const DrawingPad = ({ onClearRef, disabled }) => {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasDrawnRef.current = false;
+    onDrawStateChange?.(false);
   };
 
   const getCoordinates = (e) => {
@@ -630,6 +633,10 @@ const DrawingPad = ({ onClearRef, disabled }) => {
     e.preventDefault();
     const coords = getCoordinates(e);
     const ctx = canvasRef.current.getContext('2d');
+    if (!hasDrawnRef.current) {
+      hasDrawnRef.current = true;
+      onDrawStateChange?.(true);
+    }
     ctx.lineTo(coords.x, coords.y);
     ctx.strokeStyle = '#e4e4e7'; // zinc-200
     ctx.lineWidth = 6;
@@ -708,12 +715,14 @@ const getCardThemeClasses = (type, assessedState, revealed) => {
 const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onTriggerHaptics }) => {
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
+  const [hasDrawn, setHasDrawn] = useState(false);
   const clearPadRef = useRef(null);
 
   // Reset state if card changes
   useEffect(() => {
     setRevealed(false);
     setAssessedState(null);
+    setHasDrawn(false);
     if (clearPadRef.current) clearPadRef.current();
   }, [card.id]);
 
@@ -762,7 +771,11 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
         </div>
 
         <div className="mb-6 relative">
-          <DrawingPad onClearRef={clearPadRef} disabled={!!assessedState} />
+          <DrawingPad
+            onClearRef={clearPadRef}
+            disabled={!!assessedState}
+            onDrawStateChange={setHasDrawn}
+          />
         </div>
 
         {!revealed ? (
@@ -777,19 +790,21 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
              <button 
               onClick={() => handleAssess('missed')}
               disabled={!!assessedState}
-              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+              className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${hasDrawn ? 'flex-1' : 'w-full'}
                 ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
             >
               <X size={20} /> Missed
             </button>
-            <button 
-              onClick={() => handleAssess('gotIt')}
-              disabled={!!assessedState}
-              className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
-                ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
-            >
-              <Check size={20} /> Got it
-            </button>
+            {hasDrawn && (
+              <button 
+                onClick={() => handleAssess('gotIt')}
+                disabled={!!assessedState}
+                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
+                  ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
+              >
+                <Check size={20} /> Got it
+              </button>
+            )}
           </div>
         )}
       </div>
