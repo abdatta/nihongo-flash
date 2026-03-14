@@ -976,6 +976,9 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
 };
 
 const StatsView = ({ stats, allItems }) => {
+  const [activeStatsTab, setActiveStatsTab] = useState('k2r');
+  const touchStartXRef = useRef(null);
+
   // Helper to compute weak/improving/strong based on a specific direction
   const analyzeStats = (direction) => {
     let weak = [];
@@ -1001,56 +1004,120 @@ const StatsView = ({ stats, allItems }) => {
     return {
       weak: weak.sort((a, b) => a.ratio - b.ratio),
       improving: improving.sort((a, b) => b.ratio - a.ratio),
-      strong: strong.sort((a, b) => b.ratio - a.ratio)
+      strong: strong.sort((a, b) => b.ratio - a.ratio),
     };
   };
 
   const readingStats = useMemo(() => analyzeStats('k2r'), [stats, allItems]);
   const writingStats = useMemo(() => analyzeStats('r2k'), [stats, allItems]);
 
+  const statsTabs = [
+    {
+      id: 'k2r',
+      label: 'Reading Stats',
+      icon: BookOpen,
+      description: 'Accuracy for recognizing characters and words.',
+      data: readingStats,
+    },
+    {
+      id: 'r2k',
+      label: 'Writing Stats',
+      icon: Edit3,
+      description: 'Accuracy for recalling the correct Japanese text.',
+      data: writingStats,
+    },
+  ];
+
+  const activeTabIndex = statsTabs.findIndex(tab => tab.id === activeStatsTab);
+  const activeStats = statsTabs[activeTabIndex] ?? statsTabs[0];
+  const totalReviewed = activeStats.data.weak.length + activeStats.data.improving.length + activeStats.data.strong.length;
+
+  const handleTouchStart = (event) => {
+    touchStartXRef.current = event.touches[0]?.clientX ?? null;
+  };
+
+  const handleTouchEnd = (event) => {
+    if (touchStartXRef.current === null) return;
+
+    const endX = event.changedTouches[0]?.clientX;
+    if (typeof endX !== 'number') {
+      touchStartXRef.current = null;
+      return;
+    }
+
+    const deltaX = endX - touchStartXRef.current;
+    if (Math.abs(deltaX) < 40) {
+      touchStartXRef.current = null;
+      return;
+    }
+
+    setActiveStatsTab(deltaX < 0 ? 'r2k' : 'k2r');
+    touchStartXRef.current = null;
+  };
+
   const StatSection = ({ title, items, colorClass }) => (
-    <div className="mb-8">
-      <h4 className="text-xl font-bold text-zinc-100 mb-4 flex items-center justify-between">
-        {title} <span className="text-sm font-normal text-zinc-500">{items.length} items</span>
-      </h4>
+    <section className="mb-8 last:mb-0">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-2xl font-bold text-zinc-100">{title}</h3>
+        <span className="text-sm font-medium text-zinc-500">{items.length} items</span>
+      </div>
       {items.length === 0 ? (
-        <div className="text-zinc-600 bg-zinc-900/50 p-4 rounded-xl text-center text-sm">No items here yet.</div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-center text-sm text-zinc-600">
+          No items here yet.
+        </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-3">
           {items.map(item => (
-            <div key={item.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 flex flex-col items-center justify-center min-w-[4.5rem]">
-               <span className="text-2xl font-bold text-zinc-100 mb-1">{item.char}</span>
-               <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
+            <div
+              key={item.id}
+              className="flex min-w-[4.75rem] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3"
+            >
+              <span className="mb-1 text-2xl font-bold text-zinc-100">{item.char}</span>
+              <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 
   return (
-    <div className="flex-1 overflow-y-auto pb-24 p-6">
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-3xl font-bold text-zinc-100">Performance</h2>
+    <div
+      className="flex-1 overflow-y-auto pb-24 px-4 pt-5 sm:px-6"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="mb-6 flex justify-center">
+        <div className="inline-flex max-w-full rounded-full border border-zinc-800 bg-zinc-900/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <div className="relative inline-grid grid-cols-2 gap-1">
+          <div
+            className="absolute inset-y-0 left-0 w-[calc(50%-0.125rem)] rounded-full bg-zinc-700/95 shadow-lg transition-transform duration-300 ease-out"
+            style={{ transform: `translateX(calc(${activeTabIndex} * 100% + ${activeTabIndex * 0.25}rem))` }}
+          />
+          {statsTabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = tab.id === activeStatsTab;
+
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveStatsTab(tab.id)}
+                className={`relative z-10 flex min-w-[10.5rem] items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-colors ${
+                  isActive ? 'text-zinc-50' : 'text-zinc-400'
+                }`}
+              >
+                <Icon size={16} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        </div>
       </div>
 
-      <div className="mb-12">
-        <h3 className="text-2xl font-bold text-zinc-400 mb-6 border-b border-zinc-800 pb-3 flex items-center gap-2">
-          <BookOpen size={24} /> Reading Stats
-        </h3>
-        <StatSection title="Needs Work" items={readingStats.weak} colorClass="text-rose-400" />
-        <StatSection title="Improving" items={readingStats.improving} colorClass="text-amber-400" />
-        <StatSection title="Strong" items={readingStats.strong} colorClass="text-emerald-400" />
-      </div>
-      
-      <div>
-        <h3 className="text-2xl font-bold text-zinc-400 mb-6 border-b border-zinc-800 pb-3 flex items-center gap-2">
-          <Edit3 size={24} /> Writing Stats
-        </h3>
-        <StatSection title="Needs Work" items={writingStats.weak} colorClass="text-rose-400" />
-        <StatSection title="Improving" items={writingStats.improving} colorClass="text-amber-400" />
-        <StatSection title="Strong" items={writingStats.strong} colorClass="text-emerald-400" />
-      </div>
+      <StatSection title="Needs Work" items={activeStats.data.weak} colorClass="text-rose-400" />
+      <StatSection title="Improving" items={activeStats.data.improving} colorClass="text-amber-400" />
+      <StatSection title="Strong" items={activeStats.data.strong} colorClass="text-emerald-400" />
     </div>
   );
 };
