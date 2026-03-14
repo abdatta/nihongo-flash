@@ -5,6 +5,10 @@ const STATS_STORAGE_KEY = 'nihongo-flash:stats';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const DEFAULT_EASE = 2.5;
+const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
+const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
+
+const NOISE_BUFFER_CACHE = new WeakMap();
 
 const createEmptyDirectionStats = () => ({
   gotIt: 0,
@@ -64,6 +68,320 @@ const loadStoredStats = () => {
     return normalizeStats(JSON.parse(storedValue));
   } catch {
     return {};
+  }
+};
+
+const loadStoredSoundEnabled = () => {
+  if (typeof window === 'undefined') return true;
+
+  try {
+    const storedValue = window.localStorage.getItem(SOUND_SETTINGS_KEY);
+    return storedValue === null ? true : storedValue === 'true';
+  } catch {
+    return true;
+  }
+};
+
+const loadStoredHapticsEnabled = () => {
+  if (typeof window === 'undefined') return true;
+
+  try {
+    const storedValue = window.localStorage.getItem(HAPTICS_SETTINGS_KEY);
+    return storedValue === null ? true : storedValue === 'true';
+  } catch {
+    return true;
+  }
+};
+
+const HAPTIC_PATTERNS = {
+  reveal: 12,
+  gotIt: [18, 24, 36],
+  missed: [28, 36, 20],
+};
+
+const getNoiseBuffer = (audioContext) => {
+  const cached = NOISE_BUFFER_CACHE.get(audioContext);
+  if (cached) return cached;
+
+  const bufferSize = audioContext.sampleRate;
+  const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+  const channelData = noiseBuffer.getChannelData(0);
+
+  for (let i = 0; i < bufferSize; i += 1) {
+    channelData[i] = Math.random() * 2 - 1;
+  }
+
+  NOISE_BUFFER_CACHE.set(audioContext, noiseBuffer);
+  return noiseBuffer;
+};
+
+const playNoiseBurst = (
+  audioContext,
+  {
+    start,
+    duration,
+    gain,
+    filterType = 'bandpass',
+    frequency = 900,
+    q = 1,
+    playbackRate = 1,
+  },
+) => {
+  const source = audioContext.createBufferSource();
+  const filter = audioContext.createBiquadFilter();
+  const envelope = audioContext.createGain();
+  const end = start + duration;
+
+  source.buffer = getNoiseBuffer(audioContext);
+  source.playbackRate.setValueAtTime(playbackRate, start);
+
+  filter.type = filterType;
+  filter.frequency.setValueAtTime(frequency, start);
+  filter.Q.setValueAtTime(q, start);
+
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(gain, start + Math.min(0.01, duration * 0.25));
+  envelope.gain.exponentialRampToValueAtTime(0.0001, end);
+
+  source.connect(filter);
+  filter.connect(envelope);
+  envelope.connect(audioContext.destination);
+
+  source.start(start);
+  source.stop(end + 0.02);
+};
+
+const playToneSweep = (
+  audioContext,
+  {
+    start,
+    duration,
+    gain,
+    type = 'triangle',
+    startFrequency,
+    endFrequency,
+    filterFrequency = 1200,
+  },
+) => {
+  const oscillator = audioContext.createOscillator();
+  const filter = audioContext.createBiquadFilter();
+  const envelope = audioContext.createGain();
+  const end = start + duration;
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(startFrequency, start);
+  oscillator.frequency.exponentialRampToValueAtTime(endFrequency, end);
+
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(filterFrequency, start);
+  filter.Q.setValueAtTime(0.8, start);
+
+  envelope.gain.setValueAtTime(0.0001, start);
+  envelope.gain.exponentialRampToValueAtTime(gain, start + Math.min(0.015, duration * 0.35));
+  envelope.gain.exponentialRampToValueAtTime(0.0001, end);
+
+  oscillator.connect(filter);
+  filter.connect(envelope);
+  envelope.connect(audioContext.destination);
+
+  oscillator.start(start);
+  oscillator.stop(end + 0.02);
+};
+
+const playSoundEffect = (audioContext, effectName) => {
+  if (!audioContext) return;
+
+  const startTime = audioContext.currentTime + 0.01;
+
+  if (effectName === 'reveal') {
+    playNoiseBurst(audioContext, {
+      start: startTime,
+      duration: 0.055,
+      gain: 0.009,
+      filterType: 'bandpass',
+      frequency: 780,
+      q: 1.1,
+      playbackRate: 1.15,
+    });
+    playNoiseBurst(audioContext, {
+      start: startTime + 0.03,
+      duration: 0.045,
+      gain: 0.008,
+      filterType: 'bandpass',
+      frequency: 1200,
+      q: 1.6,
+      playbackRate: 1.4,
+    });
+    playToneSweep(audioContext, {
+      start: startTime,
+      duration: 0.09,
+      gain: 0.018,
+      type: 'triangle',
+      startFrequency: 240,
+      endFrequency: 420,
+      filterFrequency: 1400,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.018,
+      duration: 0.11,
+      gain: 0.02,
+      type: 'sine',
+      startFrequency: 420,
+      endFrequency: 760,
+      filterFrequency: 2400,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.06,
+      duration: 0.075,
+      gain: 0.013,
+      type: 'triangle',
+      startFrequency: 760,
+      endFrequency: 1100,
+      filterFrequency: 3200,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.095,
+      duration: 0.08,
+      gain: 0.011,
+      type: 'sine',
+      startFrequency: 900,
+      endFrequency: 1380,
+      filterFrequency: 4200,
+    });
+    return;
+  }
+
+  if (effectName === 'gotIt') {
+    playNoiseBurst(audioContext, {
+      start: startTime,
+      duration: 0.035,
+      gain: 0.014,
+      filterType: 'bandpass',
+      frequency: 1050,
+      q: 1.8,
+      playbackRate: 1.8,
+    });
+    playToneSweep(audioContext, {
+      start: startTime,
+      duration: 0.085,
+      gain: 0.02,
+      type: 'triangle',
+      startFrequency: 320,
+      endFrequency: 520,
+      filterFrequency: 1900,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.03,
+      duration: 0.14,
+      gain: 0.023,
+      type: 'sine',
+      startFrequency: 520,
+      endFrequency: 980,
+      filterFrequency: 3200,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.075,
+      duration: 0.17,
+      gain: 0.02,
+      type: 'triangle',
+      startFrequency: 820,
+      endFrequency: 1320,
+      filterFrequency: 4200,
+    });
+    playNoiseBurst(audioContext, {
+      start: startTime + 0.07,
+      duration: 0.045,
+      gain: 0.013,
+      filterType: 'bandpass',
+      frequency: 1900,
+      q: 2.2,
+      playbackRate: 2.1,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.12,
+      duration: 0.12,
+      gain: 0.017,
+      type: 'sine',
+      startFrequency: 980,
+      endFrequency: 1240,
+      filterFrequency: 4800,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.16,
+      duration: 0.14,
+      gain: 0.015,
+      type: 'sine',
+      startFrequency: 1180,
+      endFrequency: 1680,
+      filterFrequency: 5800,
+    });
+    playNoiseBurst(audioContext, {
+      start: startTime + 0.145,
+      duration: 0.04,
+      gain: 0.009,
+      filterType: 'bandpass',
+      frequency: 2400,
+      q: 2.6,
+      playbackRate: 2.5,
+    });
+    return;
+  }
+
+  if (effectName === 'missed') {
+    playNoiseBurst(audioContext, {
+      start: startTime,
+      duration: 0.06,
+      gain: 0.015,
+      filterType: 'bandpass',
+      frequency: 620,
+      q: 1.3,
+      playbackRate: 0.92,
+    });
+    playToneSweep(audioContext, {
+      start: startTime,
+      duration: 0.14,
+      gain: 0.026,
+      type: 'sine',
+      startFrequency: 420,
+      endFrequency: 180,
+      filterFrequency: 700,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.03,
+      duration: 0.16,
+      gain: 0.017,
+      type: 'triangle',
+      startFrequency: 310,
+      endFrequency: 120,
+      filterFrequency: 540,
+    });
+    playToneSweep(audioContext, {
+      start: startTime + 0.085,
+      duration: 0.18,
+      gain: 0.014,
+      type: 'sine',
+      startFrequency: 180,
+      endFrequency: 82,
+      filterFrequency: 260,
+    });
+    playNoiseBurst(audioContext, {
+      start: startTime + 0.05,
+      duration: 0.05,
+      gain: 0.012,
+      filterType: 'lowpass',
+      frequency: 260,
+      q: 0.9,
+      playbackRate: 0.72,
+    });
+    playNoiseBurst(audioContext, {
+      start: startTime + 0.11,
+      duration: 0.07,
+      gain: 0.01,
+      filterType: 'bandpass',
+      frequency: 180,
+      q: 0.8,
+      playbackRate: 0.58,
+    });
   }
 };
 
@@ -353,7 +671,7 @@ const getCardThemeClasses = (type, assessedState, revealed) => {
   return `${bgClass} ${borderClass}`;
 };
 
-const Flashcard = ({ card, direction, onAssess }) => {
+const Flashcard = ({ card, direction, onAssess, onPlaySound, onTriggerHaptics }) => {
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
   const clearPadRef = useRef(null);
@@ -365,10 +683,16 @@ const Flashcard = ({ card, direction, onAssess }) => {
     if (clearPadRef.current) clearPadRef.current();
   }, [card.id]);
 
-  const handleReveal = () => setRevealed(true);
+  const handleReveal = () => {
+    setRevealed(true);
+    onPlaySound?.('reveal');
+    onTriggerHaptics?.('reveal');
+  };
 
   const handleAssess = (result) => {
     setAssessedState(result);
+    onPlaySound?.(result);
+    onTriggerHaptics?.(result);
     // Add a slight delay for visual feedback before telling parent to move on
     setTimeout(() => {
       onAssess(card, result);
@@ -483,7 +807,7 @@ const Flashcard = ({ card, direction, onAssess }) => {
   );
 };
 
-const PracticeSession = ({ activePool, direction, stats, onUpdateStats }) => {
+const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySound, onTriggerHaptics }) => {
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionActive, setSessionActive] = useState(false);
@@ -554,6 +878,8 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats }) => {
           card={queue[currentIndex]} 
           direction={direction} 
           onAssess={handleAssess}
+          onPlaySound={onPlaySound}
+          onTriggerHaptics={onTriggerHaptics}
         />
       </div>
     </div>
@@ -689,6 +1015,12 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems }) =>
         <Toggle label="Kanji / Words (Custom)" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
       </div>
 
+      <div className="mb-8">
+        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Sound</h3>
+        <Toggle label="Practice Sounds" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
+        <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
+      </div>
+
       <div>
         <div className="flex items-center justify-between mb-4 ml-2">
           <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Custom Deck</h3>
@@ -753,8 +1085,11 @@ export default function App() {
     hiragana: true,
     katakana: true,
     kanji: true,
+    soundEnabled: loadStoredSoundEnabled(),
+    hapticsEnabled: loadStoredHapticsEnabled(),
   });
   const [customItems, setCustomItems] = useState(DEFAULT_KANJI);
+  const audioContextRef = useRef(null);
   
   // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
   const [stats, setStats] = useState(() => loadStoredStats());
@@ -791,6 +1126,35 @@ export default function App() {
     });
   }, []);
 
+  const playFeedbackSound = useCallback((effectName) => {
+    if (!settings.soundEnabled || typeof window === 'undefined') return;
+
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextClass();
+    }
+
+    const audioContext = audioContextRef.current;
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {});
+    }
+
+    playSoundEffect(audioContext, effectName);
+  }, [settings.soundEnabled]);
+
+  const triggerHaptics = useCallback((effectName) => {
+    if (!settings.hapticsEnabled || typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+      return;
+    }
+
+    const pattern = HAPTIC_PATTERNS[effectName];
+    if (!pattern) return;
+
+    navigator.vibrate(pattern);
+  }, [settings.hapticsEnabled]);
+
   useEffect(() => {
     try {
       window.localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(stats));
@@ -798,6 +1162,22 @@ export default function App() {
       // Ignore storage write failures so practice still works if storage is unavailable.
     }
   }, [stats]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SOUND_SETTINGS_KEY, String(settings.soundEnabled));
+    } catch {
+      // Ignore storage write failures so sound preferences stay optional.
+    }
+  }, [settings.soundEnabled]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(HAPTICS_SETTINGS_KEY, String(settings.hapticsEnabled));
+    } catch {
+      // Ignore storage write failures so haptic preferences stay optional.
+    }
+  }, [settings.hapticsEnabled]);
 
   const tabs = [
     { id: 'k2r', label: 'Read', icon: BookOpen },
@@ -822,6 +1202,8 @@ export default function App() {
             direction="r2k" 
             stats={stats}
             onUpdateStats={updateStats}
+            onPlaySound={playFeedbackSound}
+            onTriggerHaptics={triggerHaptics}
           />
         )}
         {activeTab === 'k2r' && (
@@ -830,6 +1212,8 @@ export default function App() {
             direction="k2r" 
             stats={stats}
             onUpdateStats={updateStats}
+            onPlaySound={playFeedbackSound}
+            onTriggerHaptics={triggerHaptics}
           />
         )}
         {activeTab === 'stats' && (
