@@ -823,6 +823,7 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
   const [hasDrawn, setHasDrawn] = useState(false);
+  const [hadDrawingOnReveal, setHadDrawingOnReveal] = useState(false);
   const clearPadRef = useRef(null);
 
   // Reset state if card changes
@@ -830,10 +831,12 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
     setRevealed(false);
     setAssessedState(null);
     setHasDrawn(false);
+    setHadDrawingOnReveal(false);
     if (clearPadRef.current) clearPadRef.current();
   }, [card.id]);
 
   const handleReveal = () => {
+    setHadDrawingOnReveal(hasDrawn);
     setRevealed(true);
     onPlaySound?.('reveal');
     onTriggerHaptics?.('reveal');
@@ -897,12 +900,12 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
              <button 
               onClick={() => handleAssess('missed')}
               disabled={!!assessedState}
-              className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${hasDrawn ? 'flex-1' : 'w-full'}
+              className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${hadDrawingOnReveal ? 'flex-1' : 'w-full'}
                 ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
             >
               <X size={20} /> Missed
             </button>
-            {hasDrawn && (
+            {hadDrawingOnReveal && (
               <button 
                 onClick={() => handleAssess('gotIt')}
                 disabled={!!assessedState}
