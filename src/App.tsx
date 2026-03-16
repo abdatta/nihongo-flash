@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
+import { toKana } from 'wanakana';
 import HomePage from './pages/HomePage';
 import WritePage from './pages/WritePage';
 import StatsPage from './pages/StatsPage';
@@ -16,12 +17,16 @@ import type {
   PracticeSessionProps,
   ReviewResult,
   SettingsState,
+  StudyMode,
   StatsMap,
   StatsViewProps,
   StrengthMeta,
 } from './types';
 
 const STATS_STORAGE_KEY = 'nihongo-flash:stats';
+const CUSTOM_ITEMS_STORAGE_KEY = 'nihongo-flash:custom-items';
+const WORD_ITEMS_STORAGE_KEY = 'nihongo-flash:word-items';
+const STUDY_MODE_STORAGE_KEY = 'nihongo-flash:study-mode';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const DEFAULT_EASE = 2.5;
@@ -286,6 +291,83 @@ const loadStoredHapticsEnabled = (): boolean => {
     return storedValue === null ? true : storedValue === 'true';
   } catch {
     return true;
+  }
+};
+
+const getCardStudyMode = (card: CardItem): StudyMode => (
+  card.studyMode ?? (card.type === 'word' ? 'words' : 'characters')
+);
+
+const loadStoredStudyMode = (): StudyMode => {
+  if (typeof window === 'undefined') return 'characters';
+
+  try {
+    const storedValue = window.localStorage.getItem(STUDY_MODE_STORAGE_KEY);
+    return storedValue === 'words' ? 'words' : 'characters';
+  } catch {
+    return 'characters';
+  }
+};
+
+const normalizeStoredCardItems = (
+  storedItems: unknown,
+  fallbackItems: CardItem[],
+  studyMode: StudyMode,
+  fallbackType: CardType,
+): CardItem[] => {
+  if (!Array.isArray(storedItems)) {
+    return fallbackItems;
+  }
+
+  const normalizedItems = storedItems.reduce<CardItem[]>((acc, item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return acc;
+    }
+
+    const safeItem = item as Partial<CardItem> & Record<string, unknown>;
+    const char = typeof safeItem.char === 'string' ? safeItem.char.trim() : '';
+    const romaji = typeof safeItem.romaji === 'string' ? safeItem.romaji.trim().toLowerCase() : '';
+    if (!char || !romaji) {
+      return acc;
+    }
+
+    const itemType = safeItem.type === 'hiragana' || safeItem.type === 'katakana' || safeItem.type === 'kanji' || safeItem.type === 'word'
+      ? safeItem.type
+      : fallbackType;
+
+    const meanings = Array.isArray(safeItem.meanings)
+      ? safeItem.meanings.filter((meaning): meaning is string => typeof meaning === 'string' && meaning.trim().length > 0).map(meaning => meaning.trim())
+      : [];
+
+    acc.push({
+      id: typeof safeItem.id === 'string' && safeItem.id.trim() ? safeItem.id : `${studyMode}_${Date.now()}_${index}`,
+      char,
+      romaji,
+      type: itemType,
+      studyMode,
+      meanings: studyMode === 'words' ? meanings : undefined,
+    });
+
+    return acc;
+  }, []);
+
+  return normalizedItems.length > 0 ? normalizedItems : fallbackItems;
+};
+
+const loadStoredCardItems = (
+  storageKey: string,
+  fallbackItems: CardItem[],
+  studyMode: StudyMode,
+  fallbackType: CardType,
+): CardItem[] => {
+  if (typeof window === 'undefined') return fallbackItems;
+
+  try {
+    const storedValue = window.localStorage.getItem(storageKey);
+    if (!storedValue) return fallbackItems;
+    return normalizeStoredCardItems(JSON.parse(storedValue), fallbackItems, studyMode, fallbackType);
+  } catch {
+    return fallbackItems;
   }
 };
 
@@ -827,6 +909,29 @@ const DEFAULT_KANJI: CardItem[] = [
   { id: 'kj_eki', char: '駅', romaji: 'eki', type: 'kanji' },
 ];
 
+const DEFAULT_WORDS: CardItem[] = [
+  { id: 'w_arigatou', char: 'ありがとう', romaji: 'arigatou', type: 'word', studyMode: 'words', meanings: ['thank you'] },
+  { id: 'w_sumimasen', char: 'すみません', romaji: 'sumimasen', type: 'word', studyMode: 'words', meanings: ['excuse me', 'sorry'] },
+  { id: 'w_onegaishimasu', char: 'お願いします', romaji: 'onegaishimasu', type: 'word', studyMode: 'words', meanings: ['please'] },
+  { id: 'w_konnichiwa', char: 'こんにちは', romaji: 'konnichiwa', type: 'word', studyMode: 'words', meanings: ['hello', 'good afternoon'] },
+  { id: 'w_ohayou', char: 'おはよう', romaji: 'ohayou', type: 'word', studyMode: 'words', meanings: ['good morning'] },
+  { id: 'w_konbanwa', char: 'こんばんは', romaji: 'konbanwa', type: 'word', studyMode: 'words', meanings: ['good evening'] },
+  { id: 'w_hai', char: 'はい', romaji: 'hai', type: 'word', studyMode: 'words', meanings: ['yes'] },
+  { id: 'w_iie', char: 'いいえ', romaji: 'iie', type: 'word', studyMode: 'words', meanings: ['no'] },
+  { id: 'w_mizu', char: '水', romaji: 'mizu', type: 'word', studyMode: 'words', meanings: ['water'] },
+  { id: 'w_toire', char: 'トイレ', romaji: 'toire', type: 'word', studyMode: 'words', meanings: ['toilet', 'bathroom'] },
+  { id: 'w_eki', char: '駅', romaji: 'eki', type: 'word', studyMode: 'words', meanings: ['station'] },
+  { id: 'w_densha', char: '電車', romaji: 'densha', type: 'word', studyMode: 'words', meanings: ['train'] },
+  { id: 'w_basutei', char: 'バス停', romaji: 'basutei', type: 'word', studyMode: 'words', meanings: ['bus stop'] },
+  { id: 'w_kippu', char: '切符', romaji: 'kippu', type: 'word', studyMode: 'words', meanings: ['ticket'] },
+  { id: 'w_hoteru', char: 'ホテル', romaji: 'hoteru', type: 'word', studyMode: 'words', meanings: ['hotel'] },
+  { id: 'w_kudasai', char: 'ください', romaji: 'kudasai', type: 'word', studyMode: 'words', meanings: ['please', 'please give me'] },
+  { id: 'w_ikura', char: 'いくら', romaji: 'ikura', type: 'word', studyMode: 'words', meanings: ['how much'] },
+  { id: 'w_eigo', char: '英語', romaji: 'eigo', type: 'word', studyMode: 'words', meanings: ['English language'] },
+  { id: 'w_wakarimasen', char: 'わかりません', romaji: 'wakarimasen', type: 'word', studyMode: 'words', meanings: ['I do not understand'] },
+  { id: 'w_tasukete', char: '助けて', romaji: 'tasukete', type: 'word', studyMode: 'words', meanings: ['help me', 'please help'] },
+];
+
 // --- COMPONENTS ---
 
 const DrawingPad = ({ onClearRef, disabled = false, onDrawStateChange }: DrawingPadProps) => {
@@ -936,7 +1041,8 @@ const DrawingPad = ({ onClearRef, disabled = false, onDrawStateChange }: Drawing
 const getTypeBadgeClasses = (type: CardType): string => {
   switch (type) {
     case 'hiragana': return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
-    case 'katakana': return 'bg-purple-500/20 text-purple-400 border border-purple-500/30';
+    case 'katakana': return 'bg-fuchsia-500/20 text-fuchsia-400 border border-fuchsia-500/30';
+    case 'word': return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
     case 'kanji': return 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
     default: return 'bg-zinc-800 text-zinc-400 border border-zinc-700';
   }
@@ -952,12 +1058,16 @@ const getCardThemeClasses = (type: CardType, assessedState: ReviewResult | null,
       borderClass = 'border-blue-900/50'; 
       break;
     case 'katakana': 
-      bgClass = revealed ? 'bg-purple-900/40' : 'bg-purple-950/30'; 
-      borderClass = 'border-purple-900/50'; 
+      bgClass = revealed ? 'bg-fuchsia-900/35' : 'bg-fuchsia-950/25'; 
+      borderClass = 'border-fuchsia-900/50'; 
       break;
     case 'kanji': 
       bgClass = revealed ? 'bg-amber-900/40' : 'bg-amber-950/30'; 
       borderClass = 'border-amber-900/50'; 
+      break;
+    case 'word': 
+      bgClass = revealed ? 'bg-emerald-950/35' : 'bg-emerald-950/20'; 
+      borderClass = 'border-emerald-900/40'; 
       break;
     default: 
       bgClass = revealed ? 'bg-zinc-900' : 'bg-zinc-950'; 
@@ -967,6 +1077,12 @@ const getCardThemeClasses = (type: CardType, assessedState: ReviewResult | null,
 
   return `${bgClass} ${borderClass}`;
 };
+
+const formatMeanings = (card: CardItem): string => (card.meanings?.filter(Boolean) ?? []).join(', ');
+
+const normalizeRomajiResponse = (value: string): string => (
+  value.trim().toLowerCase().replace(/\s+/g, ' ')
+);
 
 const Flashcard = ({
   card,
@@ -980,7 +1096,12 @@ const Flashcard = ({
   const [assessedState, setAssessedState] = useState<ReviewResult | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
   const [hadDrawingOnReveal, setHadDrawingOnReveal] = useState(false);
+  const [typedAnswer, setTypedAnswer] = useState('');
+  const [checkedAnswer, setCheckedAnswer] = useState<ReviewResult | null>(null);
   const clearPadRef = useRef<(() => void) | null>(null);
+  const studyMode = getCardStudyMode(card);
+  const meaningsText = formatMeanings(card);
+  const kanaPreview = typedAnswer ? toKana(typedAnswer) : '';
 
   // Reset state if card changes
   useEffect(() => {
@@ -988,6 +1109,8 @@ const Flashcard = ({
     setAssessedState(null);
     setHasDrawn(false);
     setHadDrawingOnReveal(false);
+    setTypedAnswer('');
+    setCheckedAnswer(null);
     if (clearPadRef.current) clearPadRef.current();
   }, [card.id]);
 
@@ -1011,7 +1134,85 @@ const Flashcard = ({
   const promptText = direction === 'r2k' ? card.romaji : card.char;
   const answerText = direction === 'r2k' ? card.char : card.romaji;
   const strengthMeta = getCardStrengthMeta(directionStats);
-  
+
+  if (studyMode === 'words' && direction === 'r2k') {
+    return (
+      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses('word', assessedState, revealed)} rounded-3xl p-6 shadow-2xl transition-all duration-300 relative overflow-hidden`}>
+        <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
+          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses('word')}`}>words</span>
+          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>{strengthMeta.label}</span>
+        </div>
+        <div className="mb-6 text-center">
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">Meaning</p>
+          <h2 className="text-3xl font-bold leading-tight text-zinc-100">{meaningsText || 'No meaning set'}</h2>
+          <p className="mt-3 text-sm text-zinc-500">Type the romaji. Kana preview updates as you go.</p>
+        </div>
+        <div className="mb-4 space-y-3">
+          <input type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="text" lang="ja-Latn" placeholder="Type romaji" value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} disabled={checkedAnswer !== null} className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-lg text-zinc-100 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-70" />
+          <div className="rounded-2xl border border-emerald-950/60 bg-zinc-950/80 px-4 py-3">
+            <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Kana preview</p>
+            <p className="mt-2 min-h-[1.75rem] text-lg text-emerald-300">{kanaPreview || '...'}</p>
+          </div>
+        </div>
+        {checkedAnswer === null ? (
+          <button onClick={() => { const result = normalizeRomajiResponse(typedAnswer) === normalizeRomajiResponse(card.romaji) ? 'gotIt' : 'missed'; setRevealed(true); setCheckedAnswer(result); setAssessedState(result); onPlaySound?.(result); onTriggerHaptics?.(result); }} disabled={!typedAnswer.trim()} className="w-full rounded-xl bg-zinc-100 py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500">
+            Check Answer
+          </button>
+        ) : (
+          <div className="animate-in fade-in duration-300 space-y-4">
+            <div className={`rounded-2xl border px-4 py-4 ${checkedAnswer === 'gotIt' ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-rose-500/30 bg-rose-500/10'}`}>
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-400">Correct answer</p>
+              <p className="mt-2 text-2xl font-bold text-zinc-100">{card.romaji}</p>
+              <p className="mt-2 text-lg text-emerald-300">{card.char}</p>
+            </div>
+            <button onClick={() => handleAssess(checkedAnswer)} className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 text-lg font-bold transition-colors ${checkedAnswer === 'gotIt' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
+              {checkedAnswer === 'gotIt' ? <Check size={20} /> : <X size={20} />}
+              Continue
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (studyMode === 'words') {
+    return (
+      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses('word', assessedState, revealed)} rounded-3xl p-8 shadow-2xl transition-all duration-300 min-h-[320px] relative overflow-hidden`}>
+        <div className="text-center flex-1 flex flex-col items-center justify-center relative">
+          <div className="absolute top-0 flex flex-wrap items-center justify-center gap-2">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses('word')}`}>words</span>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>{strengthMeta.label}</span>
+          </div>
+          {!revealed ? (
+            <div className="flex flex-col items-center justify-center mt-4 h-32">
+              <h2 className="text-6xl font-bold text-zinc-100 leading-none">{card.char}</h2>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center mt-4 text-center animate-in fade-in duration-300">
+              <h2 className="text-5xl font-bold text-zinc-100 leading-none">{card.char}</h2>
+              <p className="mt-4 text-2xl font-semibold text-emerald-300">{card.romaji}</p>
+              <p className="mt-3 text-base text-zinc-300">{meaningsText}</p>
+            </div>
+          )}
+        </div>
+        <div className="mt-8">
+          {!revealed ? (
+            <button onClick={handleReveal} className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md">Reveal</button>
+          ) : (
+            <div className="flex gap-3 animate-in fade-in duration-300">
+              <button onClick={() => handleAssess('missed')} disabled={!!assessedState} className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}>
+                <X size={20} /> Missed
+              </button>
+              <button onClick={() => handleAssess('gotIt')} disabled={!!assessedState} className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}>
+                <Check size={20} /> Got it
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Specific rendering for Romaji -> Kana (includes drawing pad)
   if (direction === 'r2k') {
     return (
@@ -1135,6 +1336,7 @@ const Flashcard = ({
 
 const PracticeSession = ({
   activePool,
+  studyMode,
   direction,
   stats,
   onUpdateStats,
@@ -1176,7 +1378,7 @@ const PracticeSession = ({
       <div className="flex-1 flex items-center justify-center p-6 text-center">
         <div className="max-w-xs text-zinc-400">
           <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-20" />
-          <p>No cards available. Please enable categories in Settings or add custom items.</p>
+          <p>{studyMode === 'words' ? 'No words available yet. Add or restore some words in Settings.' : 'No cards available. Please enable categories in Settings or add custom items.'}</p>
         </div>
       </div>
     );
@@ -1240,7 +1442,7 @@ const PracticeSession = ({
   );
 };
 
-const StatsView = ({ stats, allItems }: StatsViewProps) => {
+const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
   const [activeStatsTab, setActiveStatsTab] = useState<Direction>('k2r');
 
   // Helper to compute weak/improving/strong based on a specific direction
@@ -1285,23 +1487,22 @@ const StatsView = ({ stats, allItems }: StatsViewProps) => {
   }> = [
     {
       id: 'k2r',
-      label: 'Reading Stats',
+      label: studyMode === 'words' ? 'Reading Words' : 'Reading Stats',
       icon: BookOpen,
-      description: 'Accuracy for recognizing characters and words.',
+      description: studyMode === 'words' ? 'Recognition for Japanese words and their meanings.' : 'Accuracy for recognizing characters and readings.',
       data: readingStats,
     },
     {
       id: 'r2k',
-      label: 'Writing Stats',
+      label: studyMode === 'words' ? 'Writing Words' : 'Writing Stats',
       icon: Edit3,
-      description: 'Accuracy for recalling the correct Japanese text.',
+      description: studyMode === 'words' ? 'Accuracy for recalling romaji from meanings.' : 'Accuracy for recalling the correct Japanese text.',
       data: writingStats,
     },
   ];
 
   const activeTabIndex = statsTabs.findIndex(tab => tab.id === activeStatsTab);
   const activeStats = statsTabs[activeTabIndex] ?? statsTabs[0];
-  const totalReviewed = activeStats.data.weak.length + activeStats.data.improving.length + activeStats.data.strong.length;
 
   const StatSection = ({ title, items, colorClass }: StatSectionProps) => (
     <section className="mb-8 last:mb-0">
@@ -1327,6 +1528,9 @@ const StatsView = ({ stats, allItems }: StatsViewProps) => {
                 title={item.usesRecentWindow ? 'Using recent reviews' : 'Using older long-term stats'}
               />
               <span className="mb-1 text-2xl font-bold text-zinc-100">{item.char}</span>
+              {studyMode === 'words' && item.meanings?.length ? (
+                <span className="mb-1 text-center text-xs text-zinc-500">{item.meanings.join(', ')}</span>
+              ) : null}
               <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
             </div>
           ))}
@@ -1337,6 +1541,10 @@ const StatsView = ({ stats, allItems }: StatsViewProps) => {
 
   return (
     <div className="flex-1 overflow-y-auto pb-24 px-4 pt-5 sm:px-6">
+      <div className="mb-4 text-center">
+        <p className="text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">{studyMode === 'words' ? 'Words Mode' : 'Characters Mode'}</p>
+        <p className="mt-2 text-sm text-zinc-400">{activeStats.description}</p>
+      </div>
       <div className="mb-6 flex justify-center">
         <div className="inline-flex max-w-full rounded-full border border-zinc-800 bg-zinc-900/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <div className="relative inline-grid grid-cols-2 gap-1">
@@ -1377,17 +1585,25 @@ const SettingsView = ({
   setSettings,
   customItems,
   setCustomItems,
+  wordItems,
+  setWordItems,
   hapticsSupported,
 }: {
   settings: SettingsState;
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
   customItems: CardItem[];
   setCustomItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
+  wordItems: CardItem[];
+  setWordItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
   hapticsSupported: boolean;
 }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingWords, setIsEditingWords] = useState(false);
   const [newItemChar, setNewItemChar] = useState('');
   const [newItemRomaji, setNewItemRomaji] = useState('');
+  const [newWordChar, setNewWordChar] = useState('');
+  const [newWordRomaji, setNewWordRomaji] = useState('');
+  const [newWordMeanings, setNewWordMeanings] = useState('');
 
   const Toggle = ({ label, checked, onChange }: ToggleProps) => (
     <label className="flex items-center justify-between p-4 bg-zinc-900 rounded-2xl cursor-pointer hover:bg-zinc-800/80 transition-colors mb-3">
@@ -1419,15 +1635,54 @@ const SettingsView = ({
     setCustomItems(prev => prev.filter(item => item.id !== id));
   };
 
+  const handleAddWord = (e: React.FormEvent<HTMLFormElement>): void => {
+    e.preventDefault();
+    const meanings = newWordMeanings.split(',').map(meaning => meaning.trim()).filter(Boolean);
+    if (!newWordChar.trim() || !newWordRomaji.trim() || meanings.length === 0) return;
+
+    const newWord: CardItem = {
+      id: `word_${Date.now()}`,
+      char: newWordChar.trim(),
+      romaji: newWordRomaji.trim().toLowerCase(),
+      type: 'word',
+      studyMode: 'words',
+      meanings,
+    };
+
+    setWordItems(prev => [...prev, newWord]);
+    setNewWordChar('');
+    setNewWordRomaji('');
+    setNewWordMeanings('');
+  };
+
+  const removeWordItem = (id: string): void => {
+    setWordItems(prev => prev.filter(item => item.id !== id));
+  };
+
   return (
     <div className="flex-1 overflow-y-auto pb-24 p-6">
       <h2 className="text-3xl font-bold text-zinc-100 mb-8">Settings</h2>
 
       <div className="mb-8">
-        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Active Categories</h3>
-        <Toggle label="Hiragana" checked={settings.hiragana} onChange={(val) => setSettings(s => ({ ...s, hiragana: val }))} />
-        <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
-        <Toggle label="Kanji / Words (Custom)" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
+        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Study Side</h3>
+        <div className="inline-flex rounded-full border border-zinc-800 bg-zinc-900 p-1 mb-4">
+          {(['characters', 'words'] as StudyMode[]).map(mode => {
+            const isActive = settings.studyMode === mode;
+            return (
+              <button key={mode} onClick={() => setSettings(s => ({ ...s, studyMode: mode }))} className={`rounded-full px-5 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-emerald-500 text-white' : 'text-zinc-400'}`}>
+                {mode === 'characters' ? 'Characters' : 'Words'}
+              </button>
+            );
+          })}
+        </div>
+        {settings.studyMode === 'characters' && (
+          <>
+            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Active Categories</h3>
+            <Toggle label="Hiragana" checked={settings.hiragana} onChange={(val) => setSettings(s => ({ ...s, hiragana: val }))} />
+            <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
+            <Toggle label="Kanji" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
+          </>
+        )}
       </div>
 
       <div className="mb-8">
@@ -1438,6 +1693,50 @@ const SettingsView = ({
         )}
       </div>
 
+
+      {settings.studyMode === 'words' && (
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-4 ml-2">
+          <div>
+            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Words Deck</h3>
+            <p className="mt-2 text-sm text-zinc-500">Starter beginner words plus anything you add.</p>
+          </div>
+          <button onClick={() => setIsEditingWords(!isEditingWords)} className="text-emerald-500 text-sm font-bold hover:text-emerald-400">
+            {isEditingWords ? 'Done' : 'Edit'}
+          </button>
+        </div>
+
+        {isEditingWords && (
+          <form onSubmit={handleAddWord} className="bg-zinc-900 p-4 rounded-2xl mb-4 space-y-3">
+            <input type="text" placeholder="Japanese word" value={newWordChar} onChange={(e) => setNewWordChar(e.target.value)} className="w-full bg-zinc-950 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 ring-emerald-500/50 border border-zinc-800" />
+            <input type="text" placeholder="Romaji" value={newWordRomaji} onChange={(e) => setNewWordRomaji(e.target.value)} className="w-full bg-zinc-950 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 ring-emerald-500/50 border border-zinc-800" />
+            <input type="text" placeholder="Meanings (comma separated)" value={newWordMeanings} onChange={(e) => setNewWordMeanings(e.target.value)} className="w-full bg-zinc-950 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 ring-emerald-500/50 border border-zinc-800" />
+            <button type="submit" className="w-full bg-emerald-500 text-white p-3 rounded-xl hover:bg-emerald-600 transition-colors font-bold">Add Word</button>
+          </form>
+        )}
+
+        <div className="space-y-2">
+          {wordItems.map(item => (
+            <div key={item.id} className="flex items-start justify-between bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800/50">
+              <div>
+                <div className="flex gap-4 items-baseline flex-wrap">
+                  <span className="text-2xl font-bold text-zinc-100">{item.char}</span>
+                  <span className="text-zinc-400">{item.romaji}</span>
+                </div>
+                <span className="text-sm text-zinc-500">{item.meanings?.join(', ')}</span>
+              </div>
+              {isEditingWords && (
+                <button onClick={() => removeWordItem(item.id)} className="text-rose-500 hover:text-rose-400 p-2">
+                  <Trash2 size={18} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      )}
+
+      {settings.studyMode === 'characters' && (
       <div>
         <div className="flex items-center justify-between mb-4 ml-2">
           <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Custom Deck</h3>
@@ -1490,6 +1789,7 @@ const SettingsView = ({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -1500,13 +1800,15 @@ export default function App() {
   const activePage = useActivePage();
   useViewportHeightVar();
   const [settings, setSettings] = useState<SettingsState>({
+    studyMode: loadStoredStudyMode(),
     hiragana: true,
     katakana: true,
     kanji: true,
     soundEnabled: loadStoredSoundEnabled(),
     hapticsEnabled: loadStoredHapticsEnabled(),
   });
-  const [customItems, setCustomItems] = useState<CardItem[]>(DEFAULT_KANJI);
+  const [customItems, setCustomItems] = useState<CardItem[]>(() => loadStoredCardItems(CUSTOM_ITEMS_STORAGE_KEY, DEFAULT_KANJI, 'characters', 'kanji'));
+  const [wordItems, setWordItems] = useState<CardItem[]>(() => loadStoredCardItems(WORD_ITEMS_STORAGE_KEY, DEFAULT_WORDS, 'words', 'word'));
   const audioContextRef = useRef<AudioContext | null>(null);
   const hapticsSupported = useMemo(() => isLikelyHapticsSupported(), []);
   
@@ -1514,20 +1816,28 @@ export default function App() {
   const [stats, setStats] = useState<StatsMap>(() => loadStoredStats());
 
   const allItems = useMemo<CardItem[]>(() => {
+    if (settings.studyMode === 'words') {
+      return wordItems;
+    }
+
     return [
-      ...HIRAGANA,
-      ...KATAKANA,
-      ...customItems
+      ...HIRAGANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...KATAKANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
     ];
-  }, [customItems]);
+  }, [customItems, settings.studyMode, wordItems]);
 
   const activePool = useMemo<CardItem[]>(() => {
+    if (settings.studyMode === 'words') {
+      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
+    }
+
     const pool: CardItem[] = [];
-    if (settings.hiragana) pool.push(...HIRAGANA);
-    if (settings.katakana) pool.push(...KATAKANA);
-    if (settings.kanji) pool.push(...customItems);
+    if (settings.hiragana) pool.push(...HIRAGANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
+    if (settings.katakana) pool.push(...KATAKANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
+    if (settings.kanji) pool.push(...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
     return pool;
-  }, [settings, customItems]);
+  }, [settings, customItems, wordItems]);
 
   const updateStats = useCallback((id: string, result: ReviewResult, direction: Direction) => {
     setStats(prev => {
@@ -1598,8 +1908,33 @@ export default function App() {
     }
   }, [settings.hapticsEnabled]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STUDY_MODE_STORAGE_KEY, settings.studyMode);
+    } catch {
+      // Ignore storage write failures so mode switching still works for the session.
+    }
+  }, [settings.studyMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(customItems));
+    } catch {
+      // Ignore storage write failures so practice still works if storage is unavailable.
+    }
+  }, [customItems]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(WORD_ITEMS_STORAGE_KEY, JSON.stringify(wordItems));
+    } catch {
+      // Ignore storage write failures so practice still works if storage is unavailable.
+    }
+  }, [wordItems]);
+
   const practiceSessionProps: PracticeSessionComponentProps = {
     activePool,
+    studyMode: settings.studyMode,
     stats,
     onUpdateStats: updateStats,
     onPlaySound: playFeedbackSound,
@@ -1623,7 +1958,7 @@ export default function App() {
           <HomePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'stats' && (
-          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} />
+          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} studyMode={settings.studyMode} />
         )}
         {activePage === 'settings' && (
           <SettingsPage
@@ -1632,6 +1967,8 @@ export default function App() {
             setSettings={setSettings}
             customItems={customItems}
             setCustomItems={setCustomItems}
+            wordItems={wordItems}
+            setWordItems={setWordItems}
             hapticsSupported={hapticsSupported}
           />
         )}
@@ -1665,3 +2002,4 @@ export default function App() {
     </div>
   );
 }
+

@@ -10,6 +10,8 @@ export default function SettingsPage({
   setSettings,
   customItems,
   setCustomItems,
+  wordItems,
+  setWordItems,
   hapticsSupported,
 }: SettingsPageProps) {
   return (
@@ -18,6 +20,8 @@ export default function SettingsPage({
       setSettings={setSettings}
       customItems={customItems}
       setCustomItems={setCustomItems}
+      wordItems={wordItems}
+      setWordItems={setWordItems}
       hapticsSupported={hapticsSupported}
     />
   );

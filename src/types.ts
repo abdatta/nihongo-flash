@@ -1,6 +1,7 @@
 import type { ComponentType, Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-export type CardType = 'hiragana' | 'katakana' | 'kanji';
+export type CardType = 'hiragana' | 'katakana' | 'kanji' | 'word';
+export type StudyMode = 'characters' | 'words';
 export type Direction = 'k2r' | 'r2k';
 export type ReviewResult = 'gotIt' | 'missed';
 export type FeedbackEffect = 'reveal' | ReviewResult;
@@ -11,6 +12,8 @@ export interface CardItem {
   char: string;
   romaji: string;
   type: CardType;
+  studyMode?: StudyMode;
+  meanings?: string[];
 }
 
 export interface DirectionStats {
@@ -29,6 +32,7 @@ export type CardStats = Partial<Record<Direction, DirectionStats>>;
 export type StatsMap = Record<string, CardStats>;
 
 export interface SettingsState {
+  studyMode: StudyMode;
   hiragana: boolean;
   katakana: boolean;
   kanji: boolean;
@@ -46,6 +50,7 @@ export interface StrengthMeta {
 
 export interface PracticeSessionProps {
   activePool: CardItem[];
+  studyMode: StudyMode;
   direction: Direction;
   stats: StatsMap;
   onUpdateStats: (id: string, result: ReviewResult, direction: Direction) => void;
@@ -61,6 +66,8 @@ export interface SettingsViewProps {
   setSettings: Dispatch<SetStateAction<SettingsState>>;
   customItems: CardItem[];
   setCustomItems: Dispatch<SetStateAction<CardItem[]>>;
+  wordItems: CardItem[];
+  setWordItems: Dispatch<SetStateAction<CardItem[]>>;
   hapticsSupported: boolean;
 }
 
@@ -69,6 +76,7 @@ export type SettingsViewComponent = ComponentType<SettingsViewProps>;
 export interface StatsViewProps {
   stats: StatsMap;
   allItems: CardItem[];
+  studyMode: StudyMode;
 }
 
 export type StatsViewComponent = ComponentType<StatsViewProps>;
