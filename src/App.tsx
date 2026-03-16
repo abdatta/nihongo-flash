@@ -4,15 +4,83 @@ import HomePage from './pages/HomePage';
 import WritePage from './pages/WritePage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
+import type {
+  CardItem,
+  CardStats,
+  CardType,
+  Direction,
+  DirectionStats,
+  DrawingPadProps,
+  FeedbackEffect,
+  PracticeSessionComponentProps,
+  PracticeSessionProps,
+  ReviewResult,
+  SettingsState,
+  StatsMap,
+  StatsViewProps,
+  StrengthMeta,
+} from './types';
 
 const STATS_STORAGE_KEY = 'nihongo-flash:stats';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const DEFAULT_EASE = 2.5;
+const RECENT_RESULTS_LIMIT = 10;
+const MIN_RECENT_REVIEWS_FOR_STRONG = 5;
 const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
 const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
 
-const NOISE_BUFFER_CACHE = new WeakMap();
+type PageId = 'home' | 'write' | 'stats' | 'settings';
+type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
+type AudioConstructor = typeof AudioContext;
+
+interface NoiseBurstOptions {
+  start: number;
+  duration: number;
+  gain: number;
+  filterType?: BiquadFilterType;
+  frequency?: number;
+  q?: number;
+  playbackRate?: number;
+}
+
+interface ToneSweepOptions {
+  start: number;
+  duration: number;
+  gain: number;
+  type?: OscillatorType;
+  startFrequency: number;
+  endFrequency: number;
+  filterFrequency?: number;
+}
+
+interface AnalyzedStatItem extends CardItem, DirectionStats {
+  ratio: number;
+  usesRecentWindow: boolean;
+}
+
+interface StatSectionProps {
+  title: string;
+  items: AnalyzedStatItem[];
+  colorClass: string;
+}
+
+interface ToggleProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+interface FlashcardProps {
+  card: CardItem;
+  direction: Direction;
+  directionStats: DirectionStats;
+  onAssess: (card: CardItem, result: ReviewResult) => void;
+  onPlaySound?: (effectName: FeedbackEffect) => void;
+  onTriggerHaptics?: (effectName: FeedbackEffect) => void;
+}
+
+const NOISE_BUFFER_CACHE = new WeakMap<BaseAudioContext, AudioBuffer>();
 
 const NAV_PAGES = [
   { id: 'home', label: 'Home', icon: BookOpen, href: '#/', title: 'Read' },
@@ -21,7 +89,7 @@ const NAV_PAGES = [
   { id: 'settings', label: 'Settings', icon: Settings, href: '#/settings', title: 'Settings' },
 ];
 
-const normalizePageFromHash = (hash) => {
+const normalizePageFromHash = (hash: string): PageId => {
   const normalizedHash = typeof hash === 'string' ? hash.trim() : '';
   const route = normalizedHash.replace(/^#/, '') || '/';
   const pathname = route.startsWith('/') ? route : `/${route}`;
@@ -41,8 +109,8 @@ const normalizePageFromHash = (hash) => {
   }
 };
 
-const useActivePage = () => {
-  const [activePage, setActivePage] = useState(() => {
+const useActivePage = (): PageId => {
+  const [activePage, setActivePage] = useState<PageId>(() => {
     if (typeof window === 'undefined') return 'home';
     return normalizePageFromHash(window.location.hash);
   });
@@ -71,7 +139,7 @@ const useViewportHeightVar = () => {
       return undefined;
     }
 
-    let frameId = null;
+    let frameId: number | null = null;
 
     const syncViewportHeight = () => {
       if (frameId !== null) {
@@ -108,42 +176,72 @@ const useViewportHeightVar = () => {
   }, []);
 };
 
-const createEmptyDirectionStats = () => ({
+const createEmptyDirectionStats = (): DirectionStats => ({
   gotIt: 0,
   missed: 0,
   streak: 0,
   reviews: 0,
+  recentResults: [],
   ease: DEFAULT_EASE,
   intervalDays: 0,
   lastReviewedAt: null,
   dueAt: 0,
 });
 
-const normalizeStats = (storedStats) => {
+const normalizeStats = (storedStats: unknown): StatsMap => {
   if (!storedStats || typeof storedStats !== 'object' || Array.isArray(storedStats)) {
     return {};
   }
 
-  return Object.entries(storedStats).reduce((acc, [id, itemStats]) => {
+  return Object.entries(storedStats as Record<string, unknown>).reduce<StatsMap>((acc, [id, itemStats]) => {
     if (!itemStats || typeof itemStats !== 'object' || Array.isArray(itemStats)) {
       return acc;
     }
 
-    const normalizedDirections = ['k2r', 'r2k'].reduce((directions, direction) => {
-      const directionStats = itemStats[direction];
+    const normalizedDirections = (['k2r', 'r2k'] as Direction[]).reduce<CardStats>((directions, direction) => {
+      const directionStats = (itemStats as Record<string, unknown>)[direction];
       if (!directionStats || typeof directionStats !== 'object' || Array.isArray(directionStats)) {
         return directions;
       }
 
+      const safeDirectionStats = directionStats as Partial<DirectionStats> & Record<string, unknown>;
+      const gotIt = typeof safeDirectionStats.gotIt === 'number' && Number.isFinite(safeDirectionStats.gotIt)
+        ? safeDirectionStats.gotIt
+        : 0;
+      const missed = typeof safeDirectionStats.missed === 'number' && Number.isFinite(safeDirectionStats.missed)
+        ? safeDirectionStats.missed
+        : 0;
+      const streak = typeof safeDirectionStats.streak === 'number' && Number.isFinite(safeDirectionStats.streak)
+        ? safeDirectionStats.streak
+        : 0;
+      const reviews = typeof safeDirectionStats.reviews === 'number' && Number.isFinite(safeDirectionStats.reviews)
+        ? safeDirectionStats.reviews
+        : 0;
+      const ease = typeof safeDirectionStats.ease === 'number' && Number.isFinite(safeDirectionStats.ease)
+        ? Math.max(MIN_EASE, safeDirectionStats.ease)
+        : DEFAULT_EASE;
+      const intervalDays = typeof safeDirectionStats.intervalDays === 'number' && Number.isFinite(safeDirectionStats.intervalDays)
+        ? Math.max(0, safeDirectionStats.intervalDays)
+        : 0;
+      const lastReviewedAt = typeof safeDirectionStats.lastReviewedAt === 'number' && Number.isFinite(safeDirectionStats.lastReviewedAt)
+        ? safeDirectionStats.lastReviewedAt
+        : null;
+      const dueAt = typeof safeDirectionStats.dueAt === 'number' && Number.isFinite(safeDirectionStats.dueAt)
+        ? safeDirectionStats.dueAt
+        : 0;
+
       directions[direction] = {
-        gotIt: Number.isFinite(directionStats.gotIt) ? directionStats.gotIt : 0,
-        missed: Number.isFinite(directionStats.missed) ? directionStats.missed : 0,
-        streak: Number.isFinite(directionStats.streak) ? directionStats.streak : 0,
-        reviews: Number.isFinite(directionStats.reviews) ? directionStats.reviews : 0,
-        ease: Number.isFinite(directionStats.ease) ? Math.max(MIN_EASE, directionStats.ease) : DEFAULT_EASE,
-        intervalDays: Number.isFinite(directionStats.intervalDays) ? Math.max(0, directionStats.intervalDays) : 0,
-        lastReviewedAt: Number.isFinite(directionStats.lastReviewedAt) ? directionStats.lastReviewedAt : null,
-        dueAt: Number.isFinite(directionStats.dueAt) ? directionStats.dueAt : 0,
+        gotIt,
+        missed,
+        streak,
+        reviews,
+        recentResults: Array.isArray(safeDirectionStats.recentResults)
+          ? safeDirectionStats.recentResults.filter((value): value is 0 | 1 => value === 1 || value === 0).slice(-RECENT_RESULTS_LIMIT)
+          : [],
+        ease,
+        intervalDays,
+        lastReviewedAt,
+        dueAt,
       };
 
       return directions;
@@ -157,7 +255,7 @@ const normalizeStats = (storedStats) => {
   }, {});
 };
 
-const loadStoredStats = () => {
+const loadStoredStats = (): StatsMap => {
   if (typeof window === 'undefined') return {};
 
   try {
@@ -169,7 +267,7 @@ const loadStoredStats = () => {
   }
 };
 
-const loadStoredSoundEnabled = () => {
+const loadStoredSoundEnabled = (): boolean => {
   if (typeof window === 'undefined') return true;
 
   try {
@@ -180,7 +278,7 @@ const loadStoredSoundEnabled = () => {
   }
 };
 
-const loadStoredHapticsEnabled = () => {
+const loadStoredHapticsEnabled = (): boolean => {
   if (typeof window === 'undefined') return true;
 
   try {
@@ -191,13 +289,13 @@ const loadStoredHapticsEnabled = () => {
   }
 };
 
-const HAPTIC_PATTERNS = {
+const HAPTIC_PATTERNS: Record<FeedbackEffect, number | number[]> = {
   reveal: 12,
   gotIt: [18, 24, 36],
   missed: [28, 36, 20],
 };
 
-const isLikelyHapticsSupported = () => {
+const isLikelyHapticsSupported = (): boolean => {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
     return false;
   }
@@ -206,7 +304,7 @@ const isLikelyHapticsSupported = () => {
   return /Android/i.test(userAgent);
 };
 
-const getNoiseBuffer = (audioContext) => {
+const getNoiseBuffer = (audioContext: AudioContext): AudioBuffer => {
   const cached = NOISE_BUFFER_CACHE.get(audioContext);
   if (cached) return cached;
 
@@ -223,7 +321,7 @@ const getNoiseBuffer = (audioContext) => {
 };
 
 const playNoiseBurst = (
-  audioContext,
+  audioContext: AudioContext,
   {
     start,
     duration,
@@ -232,8 +330,8 @@ const playNoiseBurst = (
     frequency = 900,
     q = 1,
     playbackRate = 1,
-  },
-) => {
+  }: NoiseBurstOptions,
+): void => {
   const source = audioContext.createBufferSource();
   const filter = audioContext.createBiquadFilter();
   const envelope = audioContext.createGain();
@@ -259,7 +357,7 @@ const playNoiseBurst = (
 };
 
 const playToneSweep = (
-  audioContext,
+  audioContext: AudioContext,
   {
     start,
     duration,
@@ -268,8 +366,8 @@ const playToneSweep = (
     startFrequency,
     endFrequency,
     filterFrequency = 1200,
-  },
-) => {
+  }: ToneSweepOptions,
+): void => {
   const oscillator = audioContext.createOscillator();
   const filter = audioContext.createBiquadFilter();
   const envelope = audioContext.createGain();
@@ -295,7 +393,7 @@ const playToneSweep = (
   oscillator.stop(end + 0.02);
 };
 
-const playSoundEffect = (audioContext, effectName) => {
+const playSoundEffect = (audioContext: AudioContext | null, effectName: FeedbackEffect): void => {
   if (!audioContext) return;
 
   const startTime = audioContext.currentTime + 0.01;
@@ -492,21 +590,46 @@ const playSoundEffect = (audioContext, effectName) => {
   }
 };
 
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
-const getAccuracy = (directionStats) => {
+const getLifetimeAccuracy = (directionStats: DirectionStats): number => {
   const total = directionStats.gotIt + directionStats.missed;
   return total === 0 ? 0.5 : directionStats.gotIt / total;
 };
 
-const getScheduledDirectionStats = (stats, cardId, direction) => {
+const getRecentAccuracy = (directionStats: DirectionStats): number => {
+  const recentResults = directionStats?.recentResults ?? [];
+  if (recentResults.length === 0) {
+    return 0.5;
+  }
+
+  const gotItCount = recentResults.reduce((total, value) => total + value, 0);
+  return gotItCount / recentResults.length;
+};
+
+const hasRecentClassificationData = (directionStats: DirectionStats): boolean => (
+  (directionStats?.recentResults?.length ?? 0) >= MIN_RECENT_REVIEWS_FOR_STRONG
+);
+
+const getEffectiveAccuracy = (directionStats: DirectionStats): number => (
+  hasRecentClassificationData(directionStats)
+    ? getRecentAccuracy(directionStats)
+    : getLifetimeAccuracy(directionStats)
+);
+
+const getScheduledDirectionStats = (stats: StatsMap, cardId: string, direction: Direction): DirectionStats => {
   const existing = stats[cardId]?.[direction];
   return existing ? { ...createEmptyDirectionStats(), ...existing } : createEmptyDirectionStats();
 };
 
-const calculateNextDirectionStats = (currentDirectionStats, result, reviewedAt) => {
+const calculateNextDirectionStats = (
+  currentDirectionStats: DirectionStats,
+  result: ReviewResult,
+  reviewedAt: number,
+): DirectionStats => {
   const isGotIt = result === 'gotIt';
   const nextReviews = currentDirectionStats.reviews + 1;
+  const nextRecentResults = [...currentDirectionStats.recentResults, isGotIt ? 1 : 0].slice(-RECENT_RESULTS_LIMIT);
 
   if (!isGotIt) {
     return {
@@ -515,6 +638,7 @@ const calculateNextDirectionStats = (currentDirectionStats, result, reviewedAt) 
       missed: currentDirectionStats.missed + 1,
       streak: -1,
       reviews: nextReviews,
+      recentResults: nextRecentResults,
       ease: Math.max(MIN_EASE, currentDirectionStats.ease - 0.2),
       intervalDays: 0,
       lastReviewedAt: reviewedAt,
@@ -535,6 +659,7 @@ const calculateNextDirectionStats = (currentDirectionStats, result, reviewedAt) 
     missed: currentDirectionStats.missed,
     streak: currentDirectionStats.streak + 1,
     reviews: nextReviews,
+    recentResults: nextRecentResults,
     ease: clamp(currentDirectionStats.ease + 0.1, MIN_EASE, 3.0),
     intervalDays: nextIntervalDays,
     lastReviewedAt: reviewedAt,
@@ -542,9 +667,9 @@ const calculateNextDirectionStats = (currentDirectionStats, result, reviewedAt) 
   };
 };
 
-const getCardPriority = (card, stats, direction, now) => {
+const getCardPriority = (card: CardItem, stats: StatsMap, direction: Direction, now: number) => {
   const directionStats = getScheduledDirectionStats(stats, card.id, direction);
-  const accuracy = getAccuracy(directionStats);
+  const accuracy = getEffectiveAccuracy(directionStats);
   const isNew = directionStats.reviews === 0;
   const isDue = isNew || directionStats.dueAt <= now;
   const overdueDays = directionStats.dueAt ? Math.max(0, (now - directionStats.dueAt) / DAY_IN_MS) : 0;
@@ -568,30 +693,40 @@ const getCardPriority = (card, stats, direction, now) => {
   return { score, isDue, isNew, accuracy, directionStats };
 };
 
-const getCardStrengthMeta = (directionStats) => {
+const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined): StrengthMeta => {
   if (!directionStats || directionStats.reviews === 0) {
     return {
       bucket: 'new',
       label: 'New',
       classes: 'bg-sky-500/15 text-sky-300 border border-sky-400/25',
+      usesRecentWindow: false,
+      accuracy: 0.5,
     };
   }
 
-  const accuracy = getAccuracy(directionStats);
+  const usesRecentWindow = hasRecentClassificationData(directionStats);
+  const accuracy = getEffectiveAccuracy(directionStats);
 
   if (accuracy < 0.6 || directionStats.streak < 0) {
     return {
       bucket: 'weak',
       label: 'Weak',
       classes: 'bg-rose-500/15 text-rose-300 border border-rose-400/25',
+      usesRecentWindow,
+      accuracy,
     };
   }
 
-  if (accuracy > 0.8 && directionStats.streak >= 3) {
+  if (
+    accuracy > 0.8 &&
+    directionStats.streak >= 3
+  ) {
     return {
       bucket: 'strong',
       label: 'Strong',
       classes: 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/25',
+      usesRecentWindow,
+      accuracy,
     };
   }
 
@@ -599,10 +734,17 @@ const getCardStrengthMeta = (directionStats) => {
     bucket: 'improving',
     label: 'Improving',
     classes: 'bg-amber-500/15 text-amber-300 border border-amber-400/25',
+    usesRecentWindow,
+    accuracy,
   };
 };
 
-const buildAdaptiveQueue = (activePool, stats, direction, sessionSize = 15) => {
+const buildAdaptiveQueue = (
+  activePool: CardItem[],
+  stats: StatsMap,
+  direction: Direction,
+  sessionSize = 15,
+): CardItem[] => {
   const now = Date.now();
   const rankedCards = activePool
     .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
@@ -613,10 +755,13 @@ const buildAdaptiveQueue = (activePool, stats, direction, sessionSize = 15) => {
   const futureCards = rankedCards.filter(entry => !entry.isDue && !entry.isNew);
 
   const maxNewCards = clamp(Math.ceil(sessionSize * 0.25), 2, 4);
-  const selected = [];
+  const selected: CardItem[] = [];
   const selectedIds = new Set();
 
-  const takeCards = (entries, limit) => {
+  const takeCards = (
+    entries: Array<{ card: CardItem }>,
+    limit: number,
+  ): number => {
     for (const entry of entries) {
       if (selected.length >= sessionSize || limit <= 0) break;
       if (selectedIds.has(entry.card.id)) continue;
@@ -647,7 +792,7 @@ const buildAdaptiveQueue = (activePool, stats, direction, sessionSize = 15) => {
 };
 
 // --- DATA ---
-const HIRAGANA = [
+const HIRAGANA: CardItem[] = [
   { id: 'h_a', char: 'あ', romaji: 'a', type: 'hiragana' }, { id: 'h_i', char: 'い', romaji: 'i', type: 'hiragana' }, { id: 'h_u', char: 'う', romaji: 'u', type: 'hiragana' }, { id: 'h_e', char: 'え', romaji: 'e', type: 'hiragana' }, { id: 'h_o', char: 'お', romaji: 'o', type: 'hiragana' },
   { id: 'h_ka', char: 'か', romaji: 'ka', type: 'hiragana' }, { id: 'h_ki', char: 'き', romaji: 'ki', type: 'hiragana' }, { id: 'h_ku', char: 'く', romaji: 'ku', type: 'hiragana' }, { id: 'h_ke', char: 'け', romaji: 'ke', type: 'hiragana' }, { id: 'h_ko', char: 'こ', romaji: 'ko', type: 'hiragana' },
   { id: 'h_sa', char: 'さ', romaji: 'sa', type: 'hiragana' }, { id: 'h_shi', char: 'し', romaji: 'shi', type: 'hiragana' }, { id: 'h_su', char: 'す', romaji: 'su', type: 'hiragana' }, { id: 'h_se', char: 'せ', romaji: 'se', type: 'hiragana' }, { id: 'h_so', char: 'そ', romaji: 'so', type: 'hiragana' },
@@ -660,7 +805,7 @@ const HIRAGANA = [
   { id: 'h_wa', char: 'わ', romaji: 'wa', type: 'hiragana' }, { id: 'h_wo', char: 'を', romaji: 'wo', type: 'hiragana' }, { id: 'h_n', char: 'ん', romaji: 'n', type: 'hiragana' }
 ];
 
-const KATAKANA = [
+const KATAKANA: CardItem[] = [
   { id: 'k_a', char: 'ア', romaji: 'a', type: 'katakana' }, { id: 'k_i', char: 'イ', romaji: 'i', type: 'katakana' }, { id: 'k_u', char: 'ウ', romaji: 'u', type: 'katakana' }, { id: 'k_e', char: 'エ', romaji: 'e', type: 'katakana' }, { id: 'k_o', char: 'オ', romaji: 'o', type: 'katakana' },
   { id: 'k_ka', char: 'カ', romaji: 'ka', type: 'katakana' }, { id: 'k_ki', char: 'キ', romaji: 'ki', type: 'katakana' }, { id: 'k_ku', char: 'ク', romaji: 'ku', type: 'katakana' }, { id: 'k_ke', char: 'ケ', romaji: 'ke', type: 'katakana' }, { id: 'k_ko', char: 'コ', romaji: 'ko', type: 'katakana' },
   { id: 'k_sa', char: 'サ', romaji: 'sa', type: 'katakana' }, { id: 'k_shi', char: 'シ', romaji: 'shi', type: 'katakana' }, { id: 'k_su', char: 'ス', romaji: 'su', type: 'katakana' }, { id: 'k_se', char: 'セ', romaji: 'se', type: 'katakana' }, { id: 'k_so', char: 'ソ', romaji: 'so', type: 'katakana' },
@@ -673,7 +818,7 @@ const KATAKANA = [
   { id: 'k_wa', char: 'ワ', romaji: 'wa', type: 'katakana' }, { id: 'k_wo', char: 'ヲ', romaji: 'wo', type: 'katakana' }, { id: 'k_n', char: 'ン', romaji: 'n', type: 'katakana' }
 ];
 
-const DEFAULT_KANJI = [
+const DEFAULT_KANJI: CardItem[] = [
   { id: 'kj_nihon', char: '日本', romaji: 'nihon', type: 'kanji' },
   { id: 'kj_tokyo', char: '東京', romaji: 'tokyo', type: 'kanji' },
   { id: 'kj_kyoto', char: '京都', romaji: 'kyoto', type: 'kanji' },
@@ -684,8 +829,8 @@ const DEFAULT_KANJI = [
 
 // --- COMPONENTS ---
 
-const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
-  const canvasRef = useRef(null);
+const DrawingPad = ({ onClearRef, disabled = false, onDrawStateChange }: DrawingPadProps) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const hasDrawnRef = useRef(false);
 
@@ -695,16 +840,17 @@ const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
     }
   }, [onClearRef]);
 
-  const clearCanvas = () => {
+  const clearCanvas = (): void => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     hasDrawnRef.current = false;
     onDrawStateChange?.(false);
   };
 
-  const getCoordinates = (e) => {
+  const getCoordinates = (e: DrawEvent): { x: number; y: number } => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
@@ -713,33 +859,36 @@ const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    if (e.touches && e.touches.length > 0) {
+    if ('touches' in e && e.touches.length > 0) {
       return {
         x: (e.touches[0].clientX - rect.left) * scaleX,
         y: (e.touches[0].clientY - rect.top) * scaleY
       };
     }
+    const mouseEvent = e as React.MouseEvent<HTMLCanvasElement>;
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: (mouseEvent.clientX - rect.left) * scaleX,
+      y: (mouseEvent.clientY - rect.top) * scaleY
     };
   };
 
-  const startDrawing = (e) => {
+  const startDrawing = (e: DrawEvent): void => {
     if (disabled) return;
     e.preventDefault();
     setIsDrawing(true);
     const coords = getCoordinates(e);
-    const ctx = canvasRef.current.getContext('2d');
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
     ctx.beginPath();
     ctx.moveTo(coords.x, coords.y);
   };
 
-  const draw = (e) => {
+  const draw = (e: DrawEvent): void => {
     if (!isDrawing || disabled) return;
     e.preventDefault();
     const coords = getCoordinates(e);
-    const ctx = canvasRef.current.getContext('2d');
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
     if (!hasDrawnRef.current) {
       hasDrawnRef.current = true;
       onDrawStateChange?.(true);
@@ -752,7 +901,7 @@ const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (): void => {
     setIsDrawing(false);
   };
 
@@ -784,7 +933,7 @@ const DrawingPad = ({ onClearRef, disabled, onDrawStateChange }) => {
   );
 };
 
-const getTypeBadgeClasses = (type) => {
+const getTypeBadgeClasses = (type: CardType): string => {
   switch (type) {
     case 'hiragana': return 'bg-blue-500/20 text-blue-400 border border-blue-500/30';
     case 'katakana': return 'bg-purple-500/20 text-purple-400 border border-purple-500/30';
@@ -793,7 +942,7 @@ const getTypeBadgeClasses = (type) => {
   }
 };
 
-const getCardThemeClasses = (type, assessedState, revealed) => {
+const getCardThemeClasses = (type: CardType, assessedState: ReviewResult | null, revealed: boolean): string => {
   let bgClass = '';
   let borderClass = '';
 
@@ -819,12 +968,19 @@ const getCardThemeClasses = (type, assessedState, revealed) => {
   return `${bgClass} ${borderClass}`;
 };
 
-const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onTriggerHaptics }) => {
+const Flashcard = ({
+  card,
+  direction,
+  directionStats,
+  onAssess,
+  onPlaySound,
+  onTriggerHaptics,
+}: FlashcardProps) => {
   const [revealed, setRevealed] = useState(false);
-  const [assessedState, setAssessedState] = useState(null); // 'gotIt' | 'missed'
+  const [assessedState, setAssessedState] = useState<ReviewResult | null>(null);
   const [hasDrawn, setHasDrawn] = useState(false);
   const [hadDrawingOnReveal, setHadDrawingOnReveal] = useState(false);
-  const clearPadRef = useRef(null);
+  const clearPadRef = useRef<(() => void) | null>(null);
 
   // Reset state if card changes
   useEffect(() => {
@@ -835,14 +991,14 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
     if (clearPadRef.current) clearPadRef.current();
   }, [card.id]);
 
-  const handleReveal = () => {
+  const handleReveal = (): void => {
     setHadDrawingOnReveal(hasDrawn);
     setRevealed(true);
     onPlaySound?.('reveal');
     onTriggerHaptics?.('reveal');
   };
 
-  const handleAssess = (result) => {
+  const handleAssess = (result: ReviewResult): void => {
     setAssessedState(result);
     onPlaySound?.(result);
     onTriggerHaptics?.(result);
@@ -977,8 +1133,15 @@ const Flashcard = ({ card, direction, directionStats, onAssess, onPlaySound, onT
   );
 };
 
-const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySound, onTriggerHaptics }) => {
-  const [queue, setQueue] = useState([]);
+const PracticeSession = ({
+  activePool,
+  direction,
+  stats,
+  onUpdateStats,
+  onPlaySound,
+  onTriggerHaptics,
+}: PracticeSessionProps) => {
+  const [queue, setQueue] = useState<CardItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sessionActive, setSessionActive] = useState(() => activePool.length > 0);
 
@@ -1003,7 +1166,7 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
     }
   }, [activePool, queue.length, startSession]);
 
-  const handleAssess = (card, result) => {
+  const handleAssess = (card: CardItem, result: ReviewResult): void => {
     onUpdateStats(card.id, result, direction);
     setCurrentIndex(prev => prev + 1);
   };
@@ -1021,6 +1184,7 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
 
   const isPreparingSession = activePool.length > 0 && queue.length === 0;
   const isSessionComplete = queue.length > 0 && currentIndex >= queue.length;
+  const currentCard = queue[currentIndex];
 
   if (isPreparingSession) {
     return (
@@ -1063,10 +1227,10 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
            </div>
         </div>
         <Flashcard 
-          key={queue[currentIndex].id} // Force remount on change for clean state
-          card={queue[currentIndex]} 
+          key={currentCard.id} // Force remount on change for clean state
+          card={currentCard} 
           direction={direction} 
-          directionStats={getScheduledDirectionStats(stats, queue[currentIndex].id, direction)}
+          directionStats={getScheduledDirectionStats(stats, currentCard.id, direction)}
           onAssess={handleAssess}
           onPlaySound={onPlaySound}
           onTriggerHaptics={onTriggerHaptics}
@@ -1076,29 +1240,29 @@ const PracticeSession = ({ activePool, direction, stats, onUpdateStats, onPlaySo
   );
 };
 
-const StatsView = ({ stats, allItems }) => {
-  const [activeStatsTab, setActiveStatsTab] = useState('k2r');
-  const touchStartXRef = useRef(null);
+const StatsView = ({ stats, allItems }: StatsViewProps) => {
+  const [activeStatsTab, setActiveStatsTab] = useState<Direction>('k2r');
 
   // Helper to compute weak/improving/strong based on a specific direction
-  const analyzeStats = (direction) => {
-    let weak = [];
-    let strong = [];
-    let improving = [];
+  const analyzeStats = (direction: Direction) => {
+    const weak: AnalyzedStatItem[] = [];
+    const strong: AnalyzedStatItem[] = [];
+    const improving: AnalyzedStatItem[] = [];
 
     allItems.forEach(item => {
       const itemStat = getScheduledDirectionStats(stats, item.id, direction);
       if (itemStat.reviews === 0) return;
 
-      const ratio = getAccuracy(itemStat);
       const strengthMeta = getCardStrengthMeta(itemStat);
+      const ratio = strengthMeta.accuracy;
+      const usesRecentWindow = strengthMeta.usesRecentWindow;
 
       if (strengthMeta.bucket === 'weak') {
-        weak.push({ ...item, ...itemStat, ratio });
+        weak.push({ ...item, ...itemStat, ratio, usesRecentWindow });
       } else if (strengthMeta.bucket === 'strong') {
-        strong.push({ ...item, ...itemStat, ratio });
+        strong.push({ ...item, ...itemStat, ratio, usesRecentWindow });
       } else {
-        improving.push({ ...item, ...itemStat, ratio });
+        improving.push({ ...item, ...itemStat, ratio, usesRecentWindow });
       }
     });
 
@@ -1112,7 +1276,13 @@ const StatsView = ({ stats, allItems }) => {
   const readingStats = useMemo(() => analyzeStats('k2r'), [stats, allItems]);
   const writingStats = useMemo(() => analyzeStats('r2k'), [stats, allItems]);
 
-  const statsTabs = [
+  const statsTabs: Array<{
+    id: Direction;
+    label: string;
+    icon: typeof BookOpen;
+    description: string;
+    data: ReturnType<typeof analyzeStats>;
+  }> = [
     {
       id: 'k2r',
       label: 'Reading Stats',
@@ -1133,30 +1303,7 @@ const StatsView = ({ stats, allItems }) => {
   const activeStats = statsTabs[activeTabIndex] ?? statsTabs[0];
   const totalReviewed = activeStats.data.weak.length + activeStats.data.improving.length + activeStats.data.strong.length;
 
-  const handleTouchStart = (event) => {
-    touchStartXRef.current = event.touches[0]?.clientX ?? null;
-  };
-
-  const handleTouchEnd = (event) => {
-    if (touchStartXRef.current === null) return;
-
-    const endX = event.changedTouches[0]?.clientX;
-    if (typeof endX !== 'number') {
-      touchStartXRef.current = null;
-      return;
-    }
-
-    const deltaX = endX - touchStartXRef.current;
-    if (Math.abs(deltaX) < 40) {
-      touchStartXRef.current = null;
-      return;
-    }
-
-    setActiveStatsTab(deltaX < 0 ? 'r2k' : 'k2r');
-    touchStartXRef.current = null;
-  };
-
-  const StatSection = ({ title, items, colorClass }) => (
+  const StatSection = ({ title, items, colorClass }: StatSectionProps) => (
     <section className="mb-8 last:mb-0">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-2xl font-bold text-zinc-100">{title}</h3>
@@ -1171,8 +1318,14 @@ const StatsView = ({ stats, allItems }) => {
           {items.map(item => (
             <div
               key={item.id}
-              className="flex min-w-[4.75rem] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3"
+              className="relative flex min-w-[4.75rem] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3"
             >
+              <span
+                className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${
+                  item.usesRecentWindow ? 'bg-emerald-400' : 'bg-rose-400'
+                }`}
+                title={item.usesRecentWindow ? 'Using recent reviews' : 'Using older long-term stats'}
+              />
               <span className="mb-1 text-2xl font-bold text-zinc-100">{item.char}</span>
               <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
             </div>
@@ -1183,11 +1336,7 @@ const StatsView = ({ stats, allItems }) => {
   );
 
   return (
-    <div
-      className="flex-1 overflow-y-auto pb-24 px-4 pt-5 sm:px-6"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div className="flex-1 overflow-y-auto pb-24 px-4 pt-5 sm:px-6">
       <div className="mb-6 flex justify-center">
         <div className="inline-flex max-w-full rounded-full border border-zinc-800 bg-zinc-900/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         <div className="relative inline-grid grid-cols-2 gap-1">
@@ -1223,12 +1372,24 @@ const StatsView = ({ stats, allItems }) => {
   );
 };
 
-const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapticsSupported }) => {
+const SettingsView = ({
+  settings,
+  setSettings,
+  customItems,
+  setCustomItems,
+  hapticsSupported,
+}: {
+  settings: SettingsState;
+  setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
+  customItems: CardItem[];
+  setCustomItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
+  hapticsSupported: boolean;
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [newItemChar, setNewItemChar] = useState('');
   const [newItemRomaji, setNewItemRomaji] = useState('');
 
-  const Toggle = ({ label, checked, onChange }) => (
+  const Toggle = ({ label, checked, onChange }: ToggleProps) => (
     <label className="flex items-center justify-between p-4 bg-zinc-900 rounded-2xl cursor-pointer hover:bg-zinc-800/80 transition-colors mb-3">
       <span className="text-zinc-200 font-medium">{label}</span>
       <div className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${checked ? 'bg-emerald-500' : 'bg-zinc-700'}`}>
@@ -1238,14 +1399,14 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapt
     </label>
   );
 
-  const handleAddItem = (e) => {
+  const handleAddItem = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (!newItemChar.trim() || !newItemRomaji.trim()) return;
     
-    const newItem = {
-      id: `custom_${Date.now()}`,
-      char: newItemChar.trim(),
-      romaji: newItemRomaji.trim().toLowerCase(),
+      const newItem: CardItem = {
+        id: `custom_${Date.now()}`,
+        char: newItemChar.trim(),
+        romaji: newItemRomaji.trim().toLowerCase(),
       type: 'kanji' // Defaulting to kanji for custom, though words also work
     };
 
@@ -1254,7 +1415,7 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapt
     setNewItemRomaji('');
   };
 
-  const removeCustomItem = (id) => {
+  const removeCustomItem = (id: string): void => {
     setCustomItems(prev => prev.filter(item => item.id !== id));
   };
 
@@ -1338,21 +1499,21 @@ const SettingsView = ({ settings, setSettings, customItems, setCustomItems, hapt
 export default function App() {
   const activePage = useActivePage();
   useViewportHeightVar();
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<SettingsState>({
     hiragana: true,
     katakana: true,
     kanji: true,
     soundEnabled: loadStoredSoundEnabled(),
     hapticsEnabled: loadStoredHapticsEnabled(),
   });
-  const [customItems, setCustomItems] = useState(DEFAULT_KANJI);
-  const audioContextRef = useRef(null);
+  const [customItems, setCustomItems] = useState<CardItem[]>(DEFAULT_KANJI);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const hapticsSupported = useMemo(() => isLikelyHapticsSupported(), []);
   
   // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
-  const [stats, setStats] = useState(() => loadStoredStats());
+  const [stats, setStats] = useState<StatsMap>(() => loadStoredStats());
 
-  const allItems = useMemo(() => {
+  const allItems = useMemo<CardItem[]>(() => {
     return [
       ...HIRAGANA,
       ...KATAKANA,
@@ -1360,15 +1521,15 @@ export default function App() {
     ];
   }, [customItems]);
 
-  const activePool = useMemo(() => {
-    let pool = [];
+  const activePool = useMemo<CardItem[]>(() => {
+    const pool: CardItem[] = [];
     if (settings.hiragana) pool.push(...HIRAGANA);
     if (settings.katakana) pool.push(...KATAKANA);
     if (settings.kanji) pool.push(...customItems);
     return pool;
   }, [settings, customItems]);
 
-  const updateStats = useCallback((id, result, direction) => {
+  const updateStats = useCallback((id: string, result: ReviewResult, direction: Direction) => {
     setStats(prev => {
       const currentOverall = prev[id] || {};
       const currentDir = getScheduledDirectionStats(prev, id, direction);
@@ -1384,10 +1545,10 @@ export default function App() {
     });
   }, []);
 
-  const playFeedbackSound = useCallback((effectName) => {
+  const playFeedbackSound = useCallback((effectName: FeedbackEffect) => {
     if (!settings.soundEnabled || typeof window === 'undefined') return;
 
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const AudioContextClass: AudioConstructor | undefined = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
 
     if (!audioContextRef.current) {
@@ -1402,7 +1563,7 @@ export default function App() {
     playSoundEffect(audioContext, effectName);
   }, [settings.soundEnabled]);
 
-  const triggerHaptics = useCallback((effectName) => {
+  const triggerHaptics = useCallback((effectName: FeedbackEffect) => {
     if (!settings.hapticsEnabled || !hapticsSupported) {
       return;
     }
@@ -1437,7 +1598,7 @@ export default function App() {
     }
   }, [settings.hapticsEnabled]);
 
-  const practiceSessionProps = {
+  const practiceSessionProps: PracticeSessionComponentProps = {
     activePool,
     stats,
     onUpdateStats: updateStats,

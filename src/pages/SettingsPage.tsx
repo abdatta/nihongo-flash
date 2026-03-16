@@ -1,3 +1,9 @@
+import type { SettingsViewComponent, SettingsViewProps } from '../types';
+
+interface SettingsPageProps extends SettingsViewProps {
+  SettingsViewComponent: SettingsViewComponent;
+}
+
 export default function SettingsPage({
   SettingsViewComponent,
   settings,
@@ -5,7 +11,7 @@ export default function SettingsPage({
   customItems,
   setCustomItems,
   hapticsSupported,
-}) {
+}: SettingsPageProps) {
   return (
     <SettingsViewComponent
       settings={settings}

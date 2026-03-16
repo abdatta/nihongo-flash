@@ -1,289 +1,279 @@
 # AGENTS.md
 
-## Project Overview
+## Project Snapshot
 
-`nihongo-flash` is a small single-page React app for practicing Japanese reading and writing with flashcards.
+`nihongo-flash` is a small TypeScript React flashcard app for practicing Japanese reading and writing.
 
-The stack is intentionally minimal:
+Current stack:
 
-- Vite 7 for bundling and local development
-- React 18 with a single top-level app component
-- Tailwind CSS 3 for styling
-- `lucide-react` for icons
-- A hand-written service worker and web manifest for basic PWA support
+- Vite 7
+- React 18
+- TypeScript with strict type-checking
+- Tailwind CSS 3
+- `lucide-react`
+- Hand-written service worker and web manifest
 - GitHub Pages deployment via GitHub Actions
 
-There is no backend, no router, no external API, and no formal test suite at the moment. All application state is client-side and currently in memory only.
+There is no backend, no server state, no external API, and no formal test suite.
 
-## Repository Layout
+## Repo Layout
 
-- `src/main.jsx`: app bootstrap, global CSS import, service worker registration
-- `src/App.jsx`: nearly all application logic and UI
-- `src/index.css`: Tailwind imports plus a few global styles
+- `src/App.tsx`: almost all application logic and UI
+- `src/types.ts`: shared app types, especially cards and stats
+- `src/main.tsx`: app bootstrap and service worker registration
+- `src/pages/`: thin page wrappers for read, write, stats, and settings
+- `src/index.css`: Tailwind imports and minimal global styles
+- `public/sw.js`: service worker
 - `public/manifest.webmanifest`: PWA manifest
-- `public/sw.js`: cache-first service worker
-- `public/icons/`: PWA icons
-- `index.html`: HTML shell and manifest/icon wiring
-- `vite.config.js`: React plugin plus GitHub Pages base-path handling
-- `.github/workflows/deploy.yml`: build and deploy workflow for GitHub Pages
+- `public/icons/`: app icons
+- `index.html`: HTML shell
+- `vite.config.js`: Vite config with GitHub Pages base-path handling and app version injection
+- `.github/workflows/deploy.yml`: Pages build and deploy workflow
 
-## How The App Works
+## Architecture Notes
 
-### Main data model
+### Navigation
 
-`src/App.jsx` defines three built-in datasets near the top of the file:
+The app is a single-page shell with four hash-based pages:
 
-- `HIRAGANA`
-- `KATAKANA`
-- `DEFAULT_KANJI`
+- `#/` or `#/read`: reading practice
+- `#/write`: writing practice
+- `#/stats`: stats view
+- `#/settings`: settings
 
-Each item has this shape:
+Page selection is derived from `window.location.hash` in `useActivePage`. There is no router dependency.
 
-```js
+### Main card model
+
+Cards use this shape:
+
+```ts
 {
-  id: 'unique_id',
-  char: 'character_or_word',
-  romaji: 'reading',
+  id: string
+  char: string
+  romaji: string
   type: 'hiragana' | 'katakana' | 'kanji'
 }
 ```
 
-`customItems` is initialized from `DEFAULT_KANJI`, so the so-called "custom" deck currently doubles as the built-in kanji/word list.
+Built-in data lives in `HIRAGANA`, `KATAKANA`, and `DEFAULT_KANJI` in `src/App.tsx`.
 
-### Tabs / views
+`customItems` is still initialized from `DEFAULT_KANJI`, so the "Kanji / Words (Custom)" category currently includes the built-in kanji list plus any user-added items.
 
-The app is effectively four views selected by `activeTab` in `App`:
+### Practice flow
 
-- `k2r`: reading practice (`char -> romaji`)
-- `r2k`: writing practice (`romaji -> char`) with a drawing pad
-- `stats`: grouped performance summary
-- `settings`: category toggles and custom deck editing
+`PracticeSession` builds a 15-card session from `buildAdaptiveQueue`.
 
-There is no URL-based navigation. Switching views is entirely local state driven.
+The queue is no longer a simple random shuffle. It prioritizes:
 
-### Session flow
+- due cards
+- weaker cards
+- low-review cards
+- a limited number of new cards
 
-`PracticeSession`:
-
-- receives the active pool and direction
-- shuffles the pool
-- takes up to 15 cards per session
-- advances after the user marks a card as `gotIt` or `missed`
-
-The shuffle is currently `sort(() => 0.5 - Math.random())`, which is simple but not statistically ideal. Preserve behavior unless intentionally improving it.
+This queue uses spaced-repetition style fields such as `reviews`, `ease`, `intervalDays`, `lastReviewedAt`, and `dueAt`.
 
 ### Stats model
 
-Stats are stored in-memory in `stats` using this shape:
+Stats are stored per card and per direction (`k2r`, `r2k`) using `DirectionStats` from `src/types.ts`.
 
-```js
-{
-  [cardId]: {
-    k2r: { gotIt, missed, streak },
-    r2k: { gotIt, missed, streak }
-  }
-}
-```
+Important fields:
 
-Important: stats are not persisted to `localStorage`, IndexedDB, or any backend. A page refresh clears progress.
+- `gotIt`, `missed`: legacy lifetime counters still present during migration
+- `streak`
+- `reviews`
+- `recentResults`: last 10 outcomes stored as `1` and `0`
+- `ease`, `intervalDays`, `lastReviewedAt`, `dueAt`
 
-### Writing mode
+### Strength classification and migration
 
-`DrawingPad` is only a freehand practice surface. It does not evaluate handwriting and is not used for grading. User grading is manual via the `Got it` / `Missed` buttons.
+Strength labels are computed, not stored.
 
-## Styling And UI Conventions
+Current behavior:
 
-- Styling is almost entirely Tailwind utility classes inline in JSX.
-- The visual design is dark-first with zinc neutrals and emerald accents.
-- The app is designed like a mobile-first, app-shell experience:
-  - fixed-height viewport layout
-  - header at the top
-  - bottom navigation docked with safe-area padding
-- `src/index.css` contains only a small amount of global CSS. Keep global CSS minimal unless a cross-cutting style truly belongs there.
+- classification is based on recent results once `recentResults.length >= 5`
+- before that threshold, the app falls back to legacy lifetime accuracy for that card
+- once a card crosses the threshold, all accuracy-based logic for that card uses recent results, including queue priority and stats display
+- the stats page shows a green dot when recent-window logic is active and a red dot when the card is still on fallback logic
 
-When editing UI, preserve:
+Do not store UI labels in persisted stats. Persist stable data only.
 
-- the mobile-friendly layout
-- the bottom nav behavior
-- safe-area handling via `.pb-safe`
-- the existing visual language unless the task explicitly asks for a redesign
+## Persistence
 
-## PWA / Deployment Notes
+Persistence is partial.
 
-### Base path handling
+Persisted to `localStorage`:
 
-`vite.config.js` computes `base` from `GITHUB_REPOSITORY` when running in GitHub Actions. This matters for GitHub Pages because assets and service worker registration need the repo subpath.
+- `stats`
+- sound enabled
+- haptics enabled
 
-`src/main.jsx` correctly registers the service worker from:
+Not currently persisted:
 
-```js
-`${import.meta.env.BASE_URL}sw.js`
-```
+- category toggles (`hiragana`, `katakana`, `kanji`)
+- `customItems`
 
-Do not casually replace this with `/sw.js` or relative paths that ignore the Pages base path.
+Do not assume refresh-safe persistence exists for all settings.
 
-### HTML shell
+## Writing Mode
 
-`index.html` uses `%BASE_URL%` for the manifest and Apple touch icon links. Keep that pattern intact for Pages compatibility.
+`DrawingPad` is a freehand practice surface only.
+
+- no handwriting recognition
+- no automatic grading
+- grading remains manual through `Got it` / `Missed`
+
+## UI And Styling
+
+- Tailwind utilities are the default styling approach
+- keep global CSS minimal
+- preserve the mobile-first app-shell layout
+- preserve bottom navigation and safe-area behavior
+- keep the existing dark zinc + emerald visual language unless a redesign is explicitly requested
+
+When making UI changes, favor small local edits over introducing new abstractions unless they clearly improve maintainability.
+
+## TypeScript Guidance
+
+- Prefer shared types from `src/types.ts` over inline ad hoc object shapes
+- Keep persisted data and derived/computed UI state separate
+- If you add or change stats fields, update both normalization and any localStorage migration logic
+- Avoid bypassing type safety with `any` unless there is a strong reason and it is contained
+
+## Japanese Text / Encoding
+
+The Japanese source data was verified to be valid UTF-8 in `src/App.tsx`.
+
+Important nuance:
+
+- some terminal or shell output in this environment may display Japanese text incorrectly
+- the source file itself is not currently known to be corrupted
+
+So:
+
+- do not assume mojibake in terminal output means the file is broken
+- when editing Japanese text, still use UTF-8-safe tools and verify in the browser if needed
+
+## PWA And Deployment
+
+### Base path
+
+GitHub Pages base-path handling is intentional.
+
+- `vite.config.js` computes `base` from `GITHUB_REPOSITORY` during GitHub Actions builds
+- `src/main.tsx` registers the service worker from `${import.meta.env.BASE_URL}sw.js`
+- `index.html` uses `%BASE_URL%` for the manifest and Apple touch icon
+
+Do not casually replace these with root-relative paths.
 
 ### Service worker
 
-`public/sw.js` is a simple cache-first implementation. If you change app-shell assets or caching behavior:
+`public/sw.js` uses cache versioning via the `v` query param and cache-first behavior for app-shell assets.
+
+If you change caching or app-shell assets:
 
 - review `CACHE_NAME`
-- update `APP_SHELL` if necessary
-- verify fallback behavior still works on GitHub Pages
+- review `APP_SHELL`
+- verify GitHub Pages behavior carefully, since stale caches can mislead local testing
 
-Be careful: stale service worker caches can make debugging confusing after deploys.
+### CI / deploy
 
-### GitHub Actions
+The GitHub Actions workflow:
 
-`.github/workflows/deploy.yml`:
-
-- deploys on push to `main`
 - installs dependencies with `npm install`
-- builds with the GitHub Pages environment variables set
-- uploads `dist`
-- deploys to Pages
+- runs `npm run build`
+- deploys `dist` to GitHub Pages
 
-If you change build outputs, paths, or the Vite base behavior, also review this workflow.
+Because `npm run build` now runs `tsc --noEmit && vite build`, CI also performs TypeScript validation.
 
-## Current Sharp Edges / Known Issues
+If you change build commands, output paths, or base-path behavior, review `.github/workflows/deploy.yml`.
 
-These are important repo-specific observations an agent should notice before making changes:
+## Validation
 
-### 1. Text encoding looks wrong in `src/App.jsx`
+Primary validation commands:
 
-The kana and kanji literals currently appear mojibaked in the checked-in source, for example values like `ã‚` instead of proper Japanese characters. That usually means the file encoding was corrupted or interpreted incorrectly at some point.
+```bash
+npm install
+npm run typecheck
+npm run build
+npm run dev
+```
 
-Consequences:
+Notes:
 
-- the UI may render broken characters
-- editing the file carelessly can preserve or worsen the corruption
-- any future content additions should be handled with explicit UTF-8 awareness
+- there is no formal test suite right now
+- there is no lint script right now
+- `npm run build` is the main required verification step for code changes
 
-If you touch this data, verify the file encoding and test rendered output in the browser.
+## Change Guidance
 
-### 2. State is ephemeral
+Before non-trivial edits:
 
-`settings`, `customItems`, and `stats` all live only in React state. Refreshing the page resets them. Do not assume persistence exists.
+1. Read `src/App.tsx`, `src/types.ts`, and `src/main.tsx`
+2. Check whether the change affects service worker behavior or GitHub Pages base paths
+3. Check whether the change touches persisted stats or localStorage normalization
 
-### 3. Custom deck naming is slightly misleading
+When changing behavior:
 
-The `kanji` setting controls the built-in `DEFAULT_KANJI` items plus user-added custom items. If you split these concepts later, update both the copy and the state model consistently.
+- keep dependencies light
+- avoid introducing routing, state libraries, or backend assumptions unless requested
+- prefer targeted changes over architectural rewrites
+- keep components local unless extracting them clearly reduces complexity
 
-### 4. There are no tests or lint scripts
-
-`package.json` currently exposes only:
-
-- `npm run dev`
-- `npm run build`
-- `npm run preview`
-
-For validation, `npm run build` is the main automated check available unless you add more tooling.
-
-## Agent Workflow Expectations
-
-Before making non-trivial edits:
-
-1. Read `src/App.jsx`, `src/main.jsx`, and `vite.config.js`.
-2. Check whether the change affects the GitHub Pages base path or service worker behavior.
-3. Check whether the change touches the encoded Japanese data.
-
-When making changes:
-
-- Prefer small, targeted edits over large rewrites.
-- Keep the app dependency-light unless the user explicitly wants new tooling.
-- Avoid introducing routing, state libraries, or backend assumptions unless requested.
-- Keep components local unless a refactor clearly improves maintainability.
-
-When validating changes:
-
-1. Run `npm run build`.
-2. If the change affects PWA behavior, service worker registration, or base URLs, call that out explicitly in your summary because local verification can be misleading.
-
-## Contribution Guidance For Common Tasks
+## Common Tasks
 
 ### Adding or changing study items
 
-- Edit the data arrays in `src/App.jsx`.
-- Preserve stable unique `id` values.
-- Keep `romaji` lowercase because new custom items are normalized to lowercase.
-- Be especially careful with file encoding when editing Japanese text.
+- edit the card arrays in `src/App.tsx`
+- preserve stable unique `id` values
+- keep `romaji` lowercase
+- verify Japanese text with a UTF-8-safe editor and, if needed, in the browser rather than trusting shell output
 
-### Changing practice behavior
+### Changing practice or scheduling behavior
 
-Look at:
+Check these together:
 
+- `buildAdaptiveQueue`
 - `PracticeSession`
 - `Flashcard`
-- `updateStats`
-- `StatsView`
+- `calculateNextDirectionStats`
+- `getCardPriority`
+- `getCardStrengthMeta`
 
-These parts are tightly related, so behavior changes often need coordinated edits.
+### Changing stats or migrations
+
+Check these together:
+
+- `DirectionStats` in `src/types.ts`
+- `normalizeStats`
+- localStorage load/save behavior
+- effective accuracy helpers
+- stats page dot/status behavior
 
 ### Changing settings or deck management
 
-Look at:
+Check these together:
 
 - `SettingsView`
 - `settings` state in `App`
 - `customItems` state in `App`
-- `activePool` derivation in `App`
+- `activePool` derivation
 
-### Changing deployment behavior
+### Changing deployment or offline behavior
 
-Look at:
+Check these together:
 
 - `vite.config.js`
 - `index.html`
-- `src/main.jsx`
+- `src/main.tsx`
 - `public/sw.js`
 - `.github/workflows/deploy.yml`
 
-## Commands
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run locally:
-
-```bash
-npm run dev
-```
-
-Build for production:
-
-```bash
-npm run build
-```
-
-Preview the production build:
-
-```bash
-npm run preview
-```
-
 ## What Not To Assume
 
-- Do not assume there is persistent storage.
-- Do not assume handwriting recognition exists.
-- Do not assume the app is split into many small components; most logic is centralized in `src/App.jsx`.
-- Do not assume asset paths are root-relative; GitHub Pages base-path support is intentional.
-- Do not assume adding a new package is harmless in a project this small.
-
-## Preferred Change Style
-
-A good change in this repo is usually:
-
-- small
-- easy to review
-- mobile-safe
-- compatible with GitHub Pages
-- careful about service worker caching
-- careful about Japanese text encoding
-
-If a task suggests a bigger architecture shift, pause and make sure the extra complexity is really justified by the user request.
+- Do not assume all state is persisted
+- Do not assume handwriting recognition exists
+- Do not assume random shuffle is still the session strategy
+- Do not assume stats labels are stored directly
+- Do not assume terminal mojibake means the source file is corrupted
+- Do not assume root-relative asset paths are safe for GitHub Pages

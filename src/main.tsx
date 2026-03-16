@@ -22,7 +22,7 @@ if ('serviceWorker' in navigator) {
 
         navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
 
-        const activateWorker = (worker) => {
+        const activateWorker = (worker: ServiceWorker | null) => {
           if (!worker) return;
 
           worker.addEventListener('statechange', () => {
@@ -67,7 +67,13 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const rootElement = document.getElementById('root');
+
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
