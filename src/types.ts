@@ -17,11 +17,11 @@ export interface CardItem {
 }
 
 export interface DirectionStats {
-  gotIt: number;
-  missed: number;
+  gotIt?: number;
+  missed?: number;
   streak: number;
   reviews: number;
-  recentResults: number[];
+  recentResults: Array<0 | 1>;
   ease: number;
   intervalDays: number;
   lastReviewedAt: number | null;

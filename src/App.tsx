@@ -182,8 +182,6 @@ const useViewportHeightVar = () => {
 };
 
 const createEmptyDirectionStats = (): DirectionStats => ({
-  gotIt: 0,
-  missed: 0,
   streak: 0,
   reviews: 0,
   recentResults: [],
@@ -212,10 +210,10 @@ const normalizeStats = (storedStats: unknown): StatsMap => {
       const safeDirectionStats = directionStats as Partial<DirectionStats> & Record<string, unknown>;
       const gotIt = typeof safeDirectionStats.gotIt === 'number' && Number.isFinite(safeDirectionStats.gotIt)
         ? safeDirectionStats.gotIt
-        : 0;
+        : undefined;
       const missed = typeof safeDirectionStats.missed === 'number' && Number.isFinite(safeDirectionStats.missed)
         ? safeDirectionStats.missed
-        : 0;
+        : undefined;
       const streak = typeof safeDirectionStats.streak === 'number' && Number.isFinite(safeDirectionStats.streak)
         ? safeDirectionStats.streak
         : 0;
@@ -236,8 +234,8 @@ const normalizeStats = (storedStats: unknown): StatsMap => {
         : 0;
 
       directions[direction] = {
-        gotIt,
-        missed,
+        ...(typeof gotIt === 'number' ? { gotIt } : {}),
+        ...(typeof missed === 'number' ? { missed } : {}),
         streak,
         reviews,
         recentResults: Array.isArray(safeDirectionStats.recentResults)
@@ -674,9 +672,15 @@ const playSoundEffect = (audioContext: AudioContext | null, effectName: Feedback
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
+const hasLegacyAccuracyData = (directionStats: DirectionStats | null | undefined): boolean => (
+  typeof directionStats?.gotIt === 'number' || typeof directionStats?.missed === 'number'
+);
+
 const getLifetimeAccuracy = (directionStats: DirectionStats): number => {
-  const total = directionStats.gotIt + directionStats.missed;
-  return total === 0 ? 0.5 : directionStats.gotIt / total;
+  const gotIt = directionStats.gotIt ?? 0;
+  const missed = directionStats.missed ?? 0;
+  const total = gotIt + missed;
+  return total === 0 ? 0.5 : gotIt / total;
 };
 
 const getRecentAccuracy = (directionStats: DirectionStats): number => {
@@ -685,7 +689,7 @@ const getRecentAccuracy = (directionStats: DirectionStats): number => {
     return 0.5;
   }
 
-  const gotItCount = recentResults.reduce((total, value) => total + value, 0);
+  const gotItCount = recentResults.reduce<number>((total, value) => total + value, 0);
   return gotItCount / recentResults.length;
 };
 
@@ -693,8 +697,12 @@ const hasRecentClassificationData = (directionStats: DirectionStats): boolean =>
   (directionStats?.recentResults?.length ?? 0) >= MIN_RECENT_REVIEWS_FOR_STRONG
 );
 
+const shouldUseRecentAccuracy = (directionStats: DirectionStats): boolean => (
+  !hasLegacyAccuracyData(directionStats) || hasRecentClassificationData(directionStats)
+);
+
 const getEffectiveAccuracy = (directionStats: DirectionStats): number => (
-  hasRecentClassificationData(directionStats)
+  shouldUseRecentAccuracy(directionStats)
     ? getRecentAccuracy(directionStats)
     : getLifetimeAccuracy(directionStats)
 );
@@ -711,20 +719,24 @@ const calculateNextDirectionStats = (
 ): DirectionStats => {
   const isGotIt = result === 'gotIt';
   const nextReviews = currentDirectionStats.reviews + 1;
-  const nextRecentResults = [...currentDirectionStats.recentResults, isGotIt ? 1 : 0].slice(-RECENT_RESULTS_LIMIT);
+  const nextRecentResults = [...currentDirectionStats.recentResults, isGotIt ? 1 : 0].slice(-RECENT_RESULTS_LIMIT) as Array<0 | 1>;
+  const legacyGotIt = currentDirectionStats.gotIt ?? 0;
+  const legacyMissed = currentDirectionStats.missed ?? 0;
+  const shouldKeepLegacyAccuracy = hasLegacyAccuracyData(currentDirectionStats) && nextRecentResults.length < MIN_RECENT_REVIEWS_FOR_STRONG;
+  const baseDirectionStats: DirectionStats = {
+    streak: isGotIt ? currentDirectionStats.streak + 1 : -1,
+    reviews: nextReviews,
+    recentResults: nextRecentResults,
+    ease: isGotIt ? clamp(currentDirectionStats.ease + 0.1, MIN_EASE, 3.0) : Math.max(MIN_EASE, currentDirectionStats.ease - 0.2),
+    intervalDays: 0,
+    lastReviewedAt: reviewedAt,
+    dueAt: reviewedAt,
+  };
 
   if (!isGotIt) {
     return {
-      ...currentDirectionStats,
-      gotIt: currentDirectionStats.gotIt,
-      missed: currentDirectionStats.missed + 1,
-      streak: -1,
-      reviews: nextReviews,
-      recentResults: nextRecentResults,
-      ease: Math.max(MIN_EASE, currentDirectionStats.ease - 0.2),
-      intervalDays: 0,
-      lastReviewedAt: reviewedAt,
-      dueAt: reviewedAt,
+      ...baseDirectionStats,
+      ...(shouldKeepLegacyAccuracy ? { gotIt: legacyGotIt, missed: legacyMissed + 1 } : {}),
     };
   }
 
@@ -736,16 +748,10 @@ const calculateNextDirectionStats = (
   }
 
   return {
-    ...currentDirectionStats,
-    gotIt: currentDirectionStats.gotIt + 1,
-    missed: currentDirectionStats.missed,
-    streak: currentDirectionStats.streak + 1,
-    reviews: nextReviews,
-    recentResults: nextRecentResults,
-    ease: clamp(currentDirectionStats.ease + 0.1, MIN_EASE, 3.0),
+    ...baseDirectionStats,
     intervalDays: nextIntervalDays,
-    lastReviewedAt: reviewedAt,
     dueAt: reviewedAt + nextIntervalDays * DAY_IN_MS,
+    ...(shouldKeepLegacyAccuracy ? { gotIt: legacyGotIt + 1, missed: legacyMissed } : {}),
   };
 };
 
@@ -786,7 +792,7 @@ const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined):
     };
   }
 
-  const usesRecentWindow = hasRecentClassificationData(directionStats);
+  const usesRecentWindow = shouldUseRecentAccuracy(directionStats);
   const accuracy = getEffectiveAccuracy(directionStats);
 
   if (accuracy < 0.6 || directionStats.streak < 0) {
@@ -801,7 +807,8 @@ const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined):
 
   if (
     accuracy > 0.8 &&
-    directionStats.streak >= 3
+    directionStats.streak >= 3 &&
+    hasRecentClassificationData(directionStats)
   ) {
     return {
       bucket: 'strong',
