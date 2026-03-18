@@ -1,10 +1,10 @@
 import type { PracticeSessionComponent, PracticeSessionComponentProps } from '../types';
 
-interface WritePageProps {
+interface RecallPageProps {
   PracticeSessionComponent: PracticeSessionComponent;
   sessionProps: PracticeSessionComponentProps;
 }
 
-export default function WritePage({ PracticeSessionComponent, sessionProps }: WritePageProps) {
+export default function RecallPage({ PracticeSessionComponent, sessionProps }: RecallPageProps) {
   return <PracticeSessionComponent {...sessionProps} direction="r2k" />;
 }

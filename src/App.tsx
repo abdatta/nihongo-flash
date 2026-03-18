@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
 import { toKana } from 'wanakana';
-import HomePage from './pages/HomePage';
-import WritePage from './pages/WritePage';
+import RecognizePage from './pages/RecognizePage';
+import RecallPage from './pages/RecallPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import type {
@@ -35,7 +35,7 @@ const MIN_RECENT_REVIEWS_FOR_STRONG = 5;
 const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
 const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
 
-type PageId = 'home' | 'write' | 'stats' | 'settings';
+type PageId = 'recognize' | 'recall' | 'stats' | 'settings';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
 type AudioConstructor = typeof AudioContext;
 
@@ -88,8 +88,8 @@ interface FlashcardProps {
 const NOISE_BUFFER_CACHE = new WeakMap<BaseAudioContext, AudioBuffer>();
 
 const NAV_PAGES = [
-  { id: 'home', label: 'Home', icon: BookOpen, href: '#/', title: 'Read' },
-  { id: 'write', label: 'Write', icon: Edit3, href: '#/write', title: 'Write' },
+  { id: 'recognize', label: 'Recognize', icon: BookOpen, href: '#/recognize', title: 'Recognize' },
+  { id: 'recall', label: 'Recall', icon: Edit3, href: '#/recall', title: 'Recall' },
   { id: 'stats', label: 'Stats', icon: BarChart2, href: '#/stats', title: 'Stats' },
   { id: 'settings', label: 'Settings', icon: Settings, href: '#/settings', title: 'Settings' },
 ];
@@ -102,21 +102,38 @@ const normalizePageFromHash = (hash: string): PageId => {
   switch (pathname) {
     case '/':
     case '/read':
-      return 'home';
+    case '/recognize':
+      return 'recognize';
     case '/write':
-      return 'write';
+    case '/recall':
+      return 'recall';
     case '/stats':
       return 'stats';
     case '/settings':
       return 'settings';
     default:
-      return 'home';
+      return 'recognize';
+  }
+};
+
+const getCanonicalHash = (hash: string): string | null => {
+  const normalizedHash = typeof hash === 'string' ? hash.trim() : '';
+  const route = normalizedHash.replace(/^#/, '') || '/';
+  const pathname = route.startsWith('/') ? route : `/${route}`;
+
+  switch (pathname) {
+    case '/recognize':
+      return '#/';
+    case '/recall':
+      return '#/write';
+    default:
+      return null;
   }
 };
 
 const useActivePage = (): PageId => {
   const [activePage, setActivePage] = useState<PageId>(() => {
-    if (typeof window === 'undefined') return 'home';
+    if (typeof window === 'undefined') return 'recognize';
     return normalizePageFromHash(window.location.hash);
   });
 
@@ -124,6 +141,12 @@ const useActivePage = (): PageId => {
     if (typeof window === 'undefined') return undefined;
 
     const syncPage = () => {
+      const canonicalHash = getCanonicalHash(window.location.hash);
+      if (canonicalHash && window.location.hash !== canonicalHash) {
+        window.location.replace(`${window.location.pathname}${window.location.search}${canonicalHash}`);
+        return;
+      }
+
       setActivePage(normalizePageFromHash(window.location.hash));
     };
 
@@ -1494,16 +1517,16 @@ const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
   }> = [
     {
       id: 'k2r',
-      label: studyMode === 'words' ? 'Reading Words' : 'Reading Stats',
+      label: studyMode === 'words' ? 'Recognition Words' : 'Recognition Stats',
       icon: BookOpen,
-      description: studyMode === 'words' ? 'Recognition for Japanese words and their meanings.' : 'Accuracy for recognizing characters and readings.',
+      description: studyMode === 'words' ? 'How well you recognize Japanese words and their meanings.' : 'How well you recognize characters and their readings.',
       data: readingStats,
     },
     {
       id: 'r2k',
-      label: studyMode === 'words' ? 'Writing Words' : 'Writing Stats',
+      label: studyMode === 'words' ? 'Recall Words' : 'Recall Stats',
       icon: Edit3,
-      description: studyMode === 'words' ? 'Accuracy for recalling romaji from meanings.' : 'Accuracy for recalling the correct Japanese text.',
+      description: studyMode === 'words' ? 'How well you recall romaji from meanings.' : 'How well you recall the correct Japanese text from memory.',
       data: writingStats,
     },
   ];
@@ -1958,11 +1981,11 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden relative flex flex-col bg-[#09090b]">
-        {activePage === 'write' && (
-          <WritePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
+        {activePage === 'recall' && (
+          <RecallPage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
-        {activePage === 'home' && (
-          <HomePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
+        {activePage === 'recognize' && (
+          <RecognizePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'stats' && (
           <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} studyMode={settings.studyMode} />

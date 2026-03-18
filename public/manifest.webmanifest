@@ -1,7 +1,7 @@
 {
   "name": "Nihongo Flash",
   "short_name": "NihongoFlash",
-  "description": "Practice hiragana, katakana, and kanji from your phone.",
+  "description": "Practice Japanese through recognition and recall from your phone.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

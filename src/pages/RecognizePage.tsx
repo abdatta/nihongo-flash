@@ -1,10 +1,10 @@
 import type { PracticeSessionComponent, PracticeSessionComponentProps } from '../types';
 
-interface HomePageProps {
+interface RecognizePageProps {
   PracticeSessionComponent: PracticeSessionComponent;
   sessionProps: PracticeSessionComponentProps;
 }
 
-export default function HomePage({ PracticeSessionComponent, sessionProps }: HomePageProps) {
+export default function RecognizePage({ PracticeSessionComponent, sessionProps }: RecognizePageProps) {
   return <PracticeSessionComponent {...sessionProps} direction="k2r" />;
 }
