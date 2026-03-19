@@ -36,6 +36,10 @@ export interface SettingsState {
   hiragana: boolean;
   katakana: boolean;
   kanji: boolean;
+  jlptN5Kanji: boolean;
+  dakuten: boolean;
+  handakuten: boolean;
+  yoon: boolean;
   soundEnabled: boolean;
   hapticsEnabled: boolean;
 }

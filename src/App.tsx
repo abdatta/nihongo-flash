@@ -254,7 +254,7 @@ const normalizeStats = (storedStats: unknown): StatsMap => {
         : null;
       const dueAt = typeof safeDirectionStats.dueAt === 'number' && Number.isFinite(safeDirectionStats.dueAt)
         ? safeDirectionStats.dueAt
-        : 0;
+        : (lastReviewedAt !== null ? lastReviewedAt + intervalDays * DAY_IN_MS : 0);
 
       directions[direction] = {
         ...(typeof gotIt === 'number' ? { gotIt } : {}),
@@ -730,6 +730,23 @@ const getEffectiveAccuracy = (directionStats: DirectionStats): number => (
     : getLifetimeAccuracy(directionStats)
 );
 
+const getPriorityAccuracy = (directionStats: DirectionStats): number => {
+  if (!hasLegacyAccuracyData(directionStats) || hasRecentClassificationData(directionStats)) {
+    return getRecentAccuracy(directionStats);
+  }
+
+  const recentCount = directionStats.recentResults.length;
+  if (recentCount === 0) {
+    return getLifetimeAccuracy(directionStats);
+  }
+
+  const recentWeight = clamp(recentCount / MIN_RECENT_REVIEWS_FOR_STRONG, 0.35, 0.85);
+  const recentAccuracy = getRecentAccuracy(directionStats);
+  const lifetimeAccuracy = getLifetimeAccuracy(directionStats);
+
+  return (recentAccuracy * recentWeight) + (lifetimeAccuracy * (1 - recentWeight));
+};
+
 const getScheduledDirectionStats = (stats: StatsMap, cardId: string, direction: Direction): DirectionStats => {
   const existing = stats[cardId]?.[direction];
   return existing ? { ...createEmptyDirectionStats(), ...existing } : createEmptyDirectionStats();
@@ -780,7 +797,7 @@ const calculateNextDirectionStats = (
 
 const getCardPriority = (card: CardItem, stats: StatsMap, direction: Direction, now: number) => {
   const directionStats = getScheduledDirectionStats(stats, card.id, direction);
-  const accuracy = getEffectiveAccuracy(directionStats);
+  const accuracy = getPriorityAccuracy(directionStats);
   const isNew = directionStats.reviews === 0;
   const isDue = isNew || directionStats.dueAt <= now;
   const overdueDays = directionStats.dueAt ? Math.max(0, (now - directionStats.dueAt) / DAY_IN_MS) : 0;
@@ -789,16 +806,18 @@ const getCardPriority = (card: CardItem, stats: StatsMap, direction: Direction, 
   let score = 0;
 
   if (isDue) {
-    score += 140;
+    score += 72;
   } else {
-    score += Math.max(0, 35 - upcomingDays * 18);
+    score += Math.max(0, 42 - upcomingDays * 12);
   }
 
-  score += overdueDays * 24;
-  score += (1 - accuracy) * 55;
+  score += overdueDays * 18;
+  score += (1 - accuracy) * 72;
   score += directionStats.streak < 0 ? 18 : Math.max(0, 8 - directionStats.streak * 2);
   score += directionStats.reviews < 2 ? 14 : 0;
   score += isNew ? 22 : 0;
+  score += accuracy < 0.6 ? 16 : 0;
+  score -= accuracy > 0.85 && directionStats.streak >= 3 ? 10 : 0;
   score += Math.random() * 12;
 
   return { score, isDue, isNew, accuracy, directionStats };
@@ -862,49 +881,61 @@ const buildAdaptiveQueue = (
     .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
     .sort((a, b) => b.score - a.score);
 
-  const dueCards = rankedCards.filter(entry => entry.isDue && !entry.isNew);
-  const newCards = rankedCards.filter(entry => entry.isNew);
-  const futureCards = rankedCards.filter(entry => !entry.isDue && !entry.isNew);
+  const nonStrongEntries = rankedCards.filter(entry => !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
+  const dueNonStrongCount = nonStrongEntries.filter(entry => entry.isDue).length;
+  const nonStrongCount = nonStrongEntries.length;
+  const introducedCardCount = rankedCards.filter(entry => !entry.isNew).length;
 
-  const maxNewCards = clamp(Math.ceil(sessionSize * 0.25), 2, 4);
+  let targetNewCards = introducedCardCount < sessionSize ? 3 : 2;
+
+  if (dueNonStrongCount >= 10 || nonStrongCount >= 20) {
+    targetNewCards = 0;
+  } else if (dueNonStrongCount >= 5 || nonStrongCount >= 12) {
+    targetNewCards = 1;
+  } else if (dueNonStrongCount <= 2 && nonStrongCount <= 5) {
+    targetNewCards = 3;
+  } else {
+    targetNewCards = 2;
+  }
+
+  const maxNewCards = Math.min(3, Math.max(targetNewCards, introducedCardCount < sessionSize ? 3 : 2));
   const selected: CardItem[] = [];
   const selectedIds = new Set();
+  let newCardsSelected = 0;
 
-  const takeCards = (
-    entries: Array<{ card: CardItem }>,
-    limit: number,
-  ): number => {
-    for (const entry of entries) {
-      if (selected.length >= sessionSize || limit <= 0) break;
+  for (const entry of rankedCards) {
+    if (selected.length >= sessionSize) break;
+    if (selectedIds.has(entry.card.id)) continue;
+    if (entry.isNew && newCardsSelected >= targetNewCards) continue;
+
+    selected.push(entry.card);
+    selectedIds.add(entry.card.id);
+
+    if (entry.isNew) {
+      newCardsSelected += 1;
+    }
+  }
+
+  if (selected.length < sessionSize) {
+    for (const entry of rankedCards) {
+      if (selected.length >= sessionSize) break;
       if (selectedIds.has(entry.card.id)) continue;
+      if (entry.isNew && newCardsSelected >= maxNewCards) continue;
+
       selected.push(entry.card);
       selectedIds.add(entry.card.id);
-      limit -= 1;
+
+      if (entry.isNew) {
+        newCardsSelected += 1;
+      }
     }
-    return limit;
-  };
-
-  let remainingNewSlots = Math.min(maxNewCards, newCards.length);
-  takeCards(dueCards, sessionSize - remainingNewSlots);
-  remainingNewSlots = takeCards(newCards, remainingNewSlots);
-
-  if (selected.length < sessionSize) {
-    takeCards(futureCards, sessionSize - selected.length);
-  }
-
-  if (selected.length < sessionSize && remainingNewSlots > 0) {
-    takeCards(newCards, remainingNewSlots);
-  }
-
-  if (selected.length < sessionSize) {
-    takeCards(rankedCards, sessionSize - selected.length);
   }
 
   return selected;
 };
 
 // --- DATA ---
-const HIRAGANA: CardItem[] = [
+const BASE_HIRAGANA: CardItem[] = [
   { id: 'h_a', char: 'あ', romaji: 'a', type: 'hiragana' }, { id: 'h_i', char: 'い', romaji: 'i', type: 'hiragana' }, { id: 'h_u', char: 'う', romaji: 'u', type: 'hiragana' }, { id: 'h_e', char: 'え', romaji: 'e', type: 'hiragana' }, { id: 'h_o', char: 'お', romaji: 'o', type: 'hiragana' },
   { id: 'h_ka', char: 'か', romaji: 'ka', type: 'hiragana' }, { id: 'h_ki', char: 'き', romaji: 'ki', type: 'hiragana' }, { id: 'h_ku', char: 'く', romaji: 'ku', type: 'hiragana' }, { id: 'h_ke', char: 'け', romaji: 'ke', type: 'hiragana' }, { id: 'h_ko', char: 'こ', romaji: 'ko', type: 'hiragana' },
   { id: 'h_sa', char: 'さ', romaji: 'sa', type: 'hiragana' }, { id: 'h_shi', char: 'し', romaji: 'shi', type: 'hiragana' }, { id: 'h_su', char: 'す', romaji: 'su', type: 'hiragana' }, { id: 'h_se', char: 'せ', romaji: 'se', type: 'hiragana' }, { id: 'h_so', char: 'そ', romaji: 'so', type: 'hiragana' },
@@ -917,7 +948,39 @@ const HIRAGANA: CardItem[] = [
   { id: 'h_wa', char: 'わ', romaji: 'wa', type: 'hiragana' }, { id: 'h_wo', char: 'を', romaji: 'wo', type: 'hiragana' }, { id: 'h_n', char: 'ん', romaji: 'n', type: 'hiragana' }
 ];
 
-const KATAKANA: CardItem[] = [
+const HIRAGANA_DAKUTEN: CardItem[] = [
+  { id: 'h_ga', char: 'が', romaji: 'ga', type: 'hiragana' }, { id: 'h_gi', char: 'ぎ', romaji: 'gi', type: 'hiragana' }, { id: 'h_gu', char: 'ぐ', romaji: 'gu', type: 'hiragana' }, { id: 'h_ge', char: 'げ', romaji: 'ge', type: 'hiragana' }, { id: 'h_go', char: 'ご', romaji: 'go', type: 'hiragana' },
+  { id: 'h_za', char: 'ざ', romaji: 'za', type: 'hiragana' }, { id: 'h_ji', char: 'じ', romaji: 'ji', type: 'hiragana' }, { id: 'h_zu', char: 'ず', romaji: 'zu', type: 'hiragana' }, { id: 'h_ze', char: 'ぜ', romaji: 'ze', type: 'hiragana' }, { id: 'h_zo', char: 'ぞ', romaji: 'zo', type: 'hiragana' },
+  { id: 'h_da', char: 'だ', romaji: 'da', type: 'hiragana' }, { id: 'h_dji', char: 'ぢ', romaji: 'ji', type: 'hiragana' }, { id: 'h_dzu', char: 'づ', romaji: 'zu', type: 'hiragana' }, { id: 'h_de', char: 'で', romaji: 'de', type: 'hiragana' }, { id: 'h_do', char: 'ど', romaji: 'do', type: 'hiragana' },
+  { id: 'h_ba', char: 'ば', romaji: 'ba', type: 'hiragana' }, { id: 'h_bi', char: 'び', romaji: 'bi', type: 'hiragana' }, { id: 'h_bu', char: 'ぶ', romaji: 'bu', type: 'hiragana' }, { id: 'h_be', char: 'べ', romaji: 'be', type: 'hiragana' }, { id: 'h_bo', char: 'ぼ', romaji: 'bo', type: 'hiragana' }
+];
+
+const HIRAGANA_HANDAKUTEN: CardItem[] = [
+  { id: 'h_pa', char: 'ぱ', romaji: 'pa', type: 'hiragana' }, { id: 'h_pi', char: 'ぴ', romaji: 'pi', type: 'hiragana' }, { id: 'h_pu', char: 'ぷ', romaji: 'pu', type: 'hiragana' }, { id: 'h_pe', char: 'ぺ', romaji: 'pe', type: 'hiragana' }, { id: 'h_po', char: 'ぽ', romaji: 'po', type: 'hiragana' }
+];
+
+const HIRAGANA_YOON: CardItem[] = [
+  { id: 'h_kya', char: 'きゃ', romaji: 'kya', type: 'hiragana' }, { id: 'h_kyu', char: 'きゅ', romaji: 'kyu', type: 'hiragana' }, { id: 'h_kyo', char: 'きょ', romaji: 'kyo', type: 'hiragana' },
+  { id: 'h_gya', char: 'ぎゃ', romaji: 'gya', type: 'hiragana' }, { id: 'h_gyu', char: 'ぎゅ', romaji: 'gyu', type: 'hiragana' }, { id: 'h_gyo', char: 'ぎょ', romaji: 'gyo', type: 'hiragana' },
+  { id: 'h_sha', char: 'しゃ', romaji: 'sha', type: 'hiragana' }, { id: 'h_shu', char: 'しゅ', romaji: 'shu', type: 'hiragana' }, { id: 'h_sho', char: 'しょ', romaji: 'sho', type: 'hiragana' },
+  { id: 'h_ja', char: 'じゃ', romaji: 'ja', type: 'hiragana' }, { id: 'h_ju', char: 'じゅ', romaji: 'ju', type: 'hiragana' }, { id: 'h_jo', char: 'じょ', romaji: 'jo', type: 'hiragana' },
+  { id: 'h_cha', char: 'ちゃ', romaji: 'cha', type: 'hiragana' }, { id: 'h_chu', char: 'ちゅ', romaji: 'chu', type: 'hiragana' }, { id: 'h_cho', char: 'ちょ', romaji: 'cho', type: 'hiragana' },
+  { id: 'h_nya', char: 'にゃ', romaji: 'nya', type: 'hiragana' }, { id: 'h_nyu', char: 'にゅ', romaji: 'nyu', type: 'hiragana' }, { id: 'h_nyo', char: 'にょ', romaji: 'nyo', type: 'hiragana' },
+  { id: 'h_hya', char: 'ひゃ', romaji: 'hya', type: 'hiragana' }, { id: 'h_hyu', char: 'ひゅ', romaji: 'hyu', type: 'hiragana' }, { id: 'h_hyo', char: 'ひょ', romaji: 'hyo', type: 'hiragana' },
+  { id: 'h_bya', char: 'びゃ', romaji: 'bya', type: 'hiragana' }, { id: 'h_byu', char: 'びゅ', romaji: 'byu', type: 'hiragana' }, { id: 'h_byo', char: 'びょ', romaji: 'byo', type: 'hiragana' },
+  { id: 'h_pya', char: 'ぴゃ', romaji: 'pya', type: 'hiragana' }, { id: 'h_pyu', char: 'ぴゅ', romaji: 'pyu', type: 'hiragana' }, { id: 'h_pyo', char: 'ぴょ', romaji: 'pyo', type: 'hiragana' },
+  { id: 'h_mya', char: 'みゃ', romaji: 'mya', type: 'hiragana' }, { id: 'h_myu', char: 'みゅ', romaji: 'myu', type: 'hiragana' }, { id: 'h_myo', char: 'みょ', romaji: 'myo', type: 'hiragana' },
+  { id: 'h_rya', char: 'りゃ', romaji: 'rya', type: 'hiragana' }, { id: 'h_ryu', char: 'りゅ', romaji: 'ryu', type: 'hiragana' }, { id: 'h_ryo', char: 'りょ', romaji: 'ryo', type: 'hiragana' }
+];
+
+const HIRAGANA: CardItem[] = [
+  ...BASE_HIRAGANA,
+  ...HIRAGANA_DAKUTEN,
+  ...HIRAGANA_HANDAKUTEN,
+  ...HIRAGANA_YOON,
+];
+
+const BASE_KATAKANA: CardItem[] = [
   { id: 'k_a', char: 'ア', romaji: 'a', type: 'katakana' }, { id: 'k_i', char: 'イ', romaji: 'i', type: 'katakana' }, { id: 'k_u', char: 'ウ', romaji: 'u', type: 'katakana' }, { id: 'k_e', char: 'エ', romaji: 'e', type: 'katakana' }, { id: 'k_o', char: 'オ', romaji: 'o', type: 'katakana' },
   { id: 'k_ka', char: 'カ', romaji: 'ka', type: 'katakana' }, { id: 'k_ki', char: 'キ', romaji: 'ki', type: 'katakana' }, { id: 'k_ku', char: 'ク', romaji: 'ku', type: 'katakana' }, { id: 'k_ke', char: 'ケ', romaji: 'ke', type: 'katakana' }, { id: 'k_ko', char: 'コ', romaji: 'ko', type: 'katakana' },
   { id: 'k_sa', char: 'サ', romaji: 'sa', type: 'katakana' }, { id: 'k_shi', char: 'シ', romaji: 'shi', type: 'katakana' }, { id: 'k_su', char: 'ス', romaji: 'su', type: 'katakana' }, { id: 'k_se', char: 'セ', romaji: 'se', type: 'katakana' }, { id: 'k_so', char: 'ソ', romaji: 'so', type: 'katakana' },
@@ -928,6 +991,163 @@ const KATAKANA: CardItem[] = [
   { id: 'k_ya', char: 'ヤ', romaji: 'ya', type: 'katakana' }, { id: 'k_yu', char: 'ユ', romaji: 'yu', type: 'katakana' }, { id: 'k_yo', char: 'ヨ', romaji: 'yo', type: 'katakana' },
   { id: 'k_ra', char: 'ラ', romaji: 'ra', type: 'katakana' }, { id: 'k_ri', char: 'リ', romaji: 'ri', type: 'katakana' }, { id: 'k_ru', char: 'ル', romaji: 'ru', type: 'katakana' }, { id: 'k_re', char: 'レ', romaji: 're', type: 'katakana' }, { id: 'k_ro', char: 'ロ', romaji: 'ro', type: 'katakana' },
   { id: 'k_wa', char: 'ワ', romaji: 'wa', type: 'katakana' }, { id: 'k_wo', char: 'ヲ', romaji: 'wo', type: 'katakana' }, { id: 'k_n', char: 'ン', romaji: 'n', type: 'katakana' }
+];
+
+const KATAKANA_DAKUTEN: CardItem[] = [
+  { id: 'k_ga', char: 'ガ', romaji: 'ga', type: 'katakana' }, { id: 'k_gi', char: 'ギ', romaji: 'gi', type: 'katakana' }, { id: 'k_gu', char: 'グ', romaji: 'gu', type: 'katakana' }, { id: 'k_ge', char: 'ゲ', romaji: 'ge', type: 'katakana' }, { id: 'k_go', char: 'ゴ', romaji: 'go', type: 'katakana' },
+  { id: 'k_za', char: 'ザ', romaji: 'za', type: 'katakana' }, { id: 'k_ji', char: 'ジ', romaji: 'ji', type: 'katakana' }, { id: 'k_zu', char: 'ズ', romaji: 'zu', type: 'katakana' }, { id: 'k_ze', char: 'ゼ', romaji: 'ze', type: 'katakana' }, { id: 'k_zo', char: 'ゾ', romaji: 'zo', type: 'katakana' },
+  { id: 'k_da', char: 'ダ', romaji: 'da', type: 'katakana' }, { id: 'k_dji', char: 'ヂ', romaji: 'ji', type: 'katakana' }, { id: 'k_dzu', char: 'ヅ', romaji: 'zu', type: 'katakana' }, { id: 'k_de', char: 'デ', romaji: 'de', type: 'katakana' }, { id: 'k_do', char: 'ド', romaji: 'do', type: 'katakana' },
+  { id: 'k_ba', char: 'バ', romaji: 'ba', type: 'katakana' }, { id: 'k_bi', char: 'ビ', romaji: 'bi', type: 'katakana' }, { id: 'k_bu', char: 'ブ', romaji: 'bu', type: 'katakana' }, { id: 'k_be', char: 'ベ', romaji: 'be', type: 'katakana' }, { id: 'k_bo', char: 'ボ', romaji: 'bo', type: 'katakana' }
+];
+
+const KATAKANA_HANDAKUTEN: CardItem[] = [
+  { id: 'k_pa', char: 'パ', romaji: 'pa', type: 'katakana' }, { id: 'k_pi', char: 'ピ', romaji: 'pi', type: 'katakana' }, { id: 'k_pu', char: 'プ', romaji: 'pu', type: 'katakana' }, { id: 'k_pe', char: 'ペ', romaji: 'pe', type: 'katakana' }, { id: 'k_po', char: 'ポ', romaji: 'po', type: 'katakana' }
+];
+
+const KATAKANA_YOON: CardItem[] = [
+  { id: 'k_kya', char: 'キャ', romaji: 'kya', type: 'katakana' }, { id: 'k_kyu', char: 'キュ', romaji: 'kyu', type: 'katakana' }, { id: 'k_kyo', char: 'キョ', romaji: 'kyo', type: 'katakana' },
+  { id: 'k_gya', char: 'ギャ', romaji: 'gya', type: 'katakana' }, { id: 'k_gyu', char: 'ギュ', romaji: 'gyu', type: 'katakana' }, { id: 'k_gyo', char: 'ギョ', romaji: 'gyo', type: 'katakana' },
+  { id: 'k_sha', char: 'シャ', romaji: 'sha', type: 'katakana' }, { id: 'k_shu', char: 'シュ', romaji: 'shu', type: 'katakana' }, { id: 'k_sho', char: 'ショ', romaji: 'sho', type: 'katakana' },
+  { id: 'k_ja', char: 'ジャ', romaji: 'ja', type: 'katakana' }, { id: 'k_ju', char: 'ジュ', romaji: 'ju', type: 'katakana' }, { id: 'k_jo', char: 'ジョ', romaji: 'jo', type: 'katakana' },
+  { id: 'k_cha', char: 'チャ', romaji: 'cha', type: 'katakana' }, { id: 'k_chu', char: 'チュ', romaji: 'chu', type: 'katakana' }, { id: 'k_cho', char: 'チョ', romaji: 'cho', type: 'katakana' },
+  { id: 'k_nya', char: 'ニャ', romaji: 'nya', type: 'katakana' }, { id: 'k_nyu', char: 'ニュ', romaji: 'nyu', type: 'katakana' }, { id: 'k_nyo', char: 'ニョ', romaji: 'nyo', type: 'katakana' },
+  { id: 'k_hya', char: 'ヒャ', romaji: 'hya', type: 'katakana' }, { id: 'k_hyu', char: 'ヒュ', romaji: 'hyu', type: 'katakana' }, { id: 'k_hyo', char: 'ヒョ', romaji: 'hyo', type: 'katakana' },
+  { id: 'k_bya', char: 'ビャ', romaji: 'bya', type: 'katakana' }, { id: 'k_byu', char: 'ビュ', romaji: 'byu', type: 'katakana' }, { id: 'k_byo', char: 'ビョ', romaji: 'byo', type: 'katakana' },
+  { id: 'k_pya', char: 'ピャ', romaji: 'pya', type: 'katakana' }, { id: 'k_pyu', char: 'ピュ', romaji: 'pyu', type: 'katakana' }, { id: 'k_pyo', char: 'ピョ', romaji: 'pyo', type: 'katakana' },
+  { id: 'k_mya', char: 'ミャ', romaji: 'mya', type: 'katakana' }, { id: 'k_myu', char: 'ミュ', romaji: 'myu', type: 'katakana' }, { id: 'k_myo', char: 'ミョ', romaji: 'myo', type: 'katakana' },
+  { id: 'k_rya', char: 'リャ', romaji: 'rya', type: 'katakana' }, { id: 'k_ryu', char: 'リュ', romaji: 'ryu', type: 'katakana' }, { id: 'k_ryo', char: 'リョ', romaji: 'ryo', type: 'katakana' }
+];
+
+const KATAKANA: CardItem[] = [
+  ...BASE_KATAKANA,
+  ...KATAKANA_DAKUTEN,
+  ...KATAKANA_HANDAKUTEN,
+  ...KATAKANA_YOON,
+];
+
+const getEnabledHiraganaCards = (settings: SettingsState): CardItem[] => {
+  const cards = [...BASE_HIRAGANA];
+
+  if (settings.dakuten) {
+    cards.push(...HIRAGANA_DAKUTEN);
+  }
+
+  if (settings.handakuten) {
+    cards.push(...HIRAGANA_HANDAKUTEN);
+  }
+
+  if (settings.yoon) {
+    cards.push(...HIRAGANA_YOON);
+  }
+
+  return cards;
+};
+
+const getEnabledKatakanaCards = (settings: SettingsState): CardItem[] => {
+  const cards = [...BASE_KATAKANA];
+
+  if (settings.dakuten) {
+    cards.push(...KATAKANA_DAKUTEN);
+  }
+
+  if (settings.handakuten) {
+    cards.push(...KATAKANA_HANDAKUTEN);
+  }
+
+  if (settings.yoon) {
+    cards.push(...KATAKANA_YOON);
+  }
+
+  return cards;
+};
+
+const JLPT_N5_KANJI: CardItem[] = [
+  { id: 'n5_ichi', char: '一', romaji: 'ichi', type: 'kanji', meanings: ['one'] },
+  { id: 'n5_ni', char: '二', romaji: 'ni', type: 'kanji', meanings: ['two'] },
+  { id: 'n5_san', char: '三', romaji: 'san', type: 'kanji', meanings: ['three'] },
+  { id: 'n5_yon', char: '四', romaji: 'yon', type: 'kanji', meanings: ['four'] },
+  { id: 'n5_go', char: '五', romaji: 'go', type: 'kanji', meanings: ['five'] },
+  { id: 'n5_roku', char: '六', romaji: 'roku', type: 'kanji', meanings: ['six'] },
+  { id: 'n5_nana', char: '七', romaji: 'nana', type: 'kanji', meanings: ['seven'] },
+  { id: 'n5_hachi', char: '八', romaji: 'hachi', type: 'kanji', meanings: ['eight'] },
+  { id: 'n5_kyuu', char: '九', romaji: 'kyuu', type: 'kanji', meanings: ['nine'] },
+  { id: 'n5_juu', char: '十', romaji: 'juu', type: 'kanji', meanings: ['ten'] },
+  { id: 'n5_hyaku', char: '百', romaji: 'hyaku', type: 'kanji', meanings: ['hundred'] },
+  { id: 'n5_sen', char: '千', romaji: 'sen', type: 'kanji', meanings: ['thousand'] },
+  { id: 'n5_man', char: '万', romaji: 'man', type: 'kanji', meanings: ['ten thousand'] },
+  { id: 'n5_en', char: '円', romaji: 'en', type: 'kanji', meanings: ['yen', 'circle'] },
+  { id: 'n5_hi_day', char: '日', romaji: 'hi', type: 'kanji', meanings: ['day', 'sun'] },
+  { id: 'n5_tsuki', char: '月', romaji: 'tsuki', type: 'kanji', meanings: ['month', 'moon'] },
+  { id: 'n5_hi_fire', char: '火', romaji: 'hi', type: 'kanji', meanings: ['fire'] },
+  { id: 'n5_mizu', char: '水', romaji: 'mizu', type: 'kanji', meanings: ['water'] },
+  { id: 'n5_ki', char: '木', romaji: 'ki', type: 'kanji', meanings: ['tree', 'wood'] },
+  { id: 'n5_kane', char: '金', romaji: 'kane', type: 'kanji', meanings: ['money', 'gold'] },
+  { id: 'n5_tsuchi', char: '土', romaji: 'tsuchi', type: 'kanji', meanings: ['earth', 'soil'] },
+  { id: 'n5_hito', char: '人', romaji: 'hito', type: 'kanji', meanings: ['person'] },
+  { id: 'n5_ko', char: '子', romaji: 'ko', type: 'kanji', meanings: ['child'] },
+  { id: 'n5_onna', char: '女', romaji: 'onna', type: 'kanji', meanings: ['woman', 'female'] },
+  { id: 'n5_otoko', char: '男', romaji: 'otoko', type: 'kanji', meanings: ['man', 'male'] },
+  { id: 'n5_ue', char: '上', romaji: 'ue', type: 'kanji', meanings: ['up', 'above'] },
+  { id: 'n5_shita', char: '下', romaji: 'shita', type: 'kanji', meanings: ['down', 'below'] },
+  { id: 'n5_naka', char: '中', romaji: 'naka', type: 'kanji', meanings: ['middle', 'inside'] },
+  { id: 'n5_ookii', char: '大', romaji: 'ookii', type: 'kanji', meanings: ['big', 'large'] },
+  { id: 'n5_chiisai', char: '小', romaji: 'chiisai', type: 'kanji', meanings: ['small'] },
+  { id: 'n5_hon', char: '本', romaji: 'hon', type: 'kanji', meanings: ['book', 'origin'] },
+  { id: 'n5_han', char: '半', romaji: 'han', type: 'kanji', meanings: ['half'] },
+  { id: 'n5_bun', char: '分', romaji: 'bun', type: 'kanji', meanings: ['part', 'minute'] },
+  { id: 'n5_toki', char: '時', romaji: 'toki', type: 'kanji', meanings: ['time', 'hour'] },
+  { id: 'n5_saki', char: '先', romaji: 'saki', type: 'kanji', meanings: ['ahead', 'previous'] },
+  { id: 'n5_sei', char: '生', romaji: 'sei', type: 'kanji', meanings: ['life', 'birth', 'student'] },
+  { id: 'n5_gaku', char: '学', romaji: 'gaku', type: 'kanji', meanings: ['study', 'learning'] },
+  { id: 'n5_kou', char: '校', romaji: 'kou', type: 'kanji', meanings: ['school'] },
+  { id: 'n5_go_language', char: '語', romaji: 'go', type: 'kanji', meanings: ['language', 'word'] },
+  { id: 'n5_bun_text', char: '文', romaji: 'bun', type: 'kanji', meanings: ['sentence', 'writing'] },
+  { id: 'n5_ji_letter', char: '字', romaji: 'ji', type: 'kanji', meanings: ['character', 'letter'] },
+  { id: 'n5_na', char: '名', romaji: 'na', type: 'kanji', meanings: ['name'] },
+  { id: 'n5_toshi', char: '年', romaji: 'toshi', type: 'kanji', meanings: ['year'] },
+  { id: 'n5_shiro', char: '白', romaji: 'shiro', type: 'kanji', meanings: ['white'] },
+  { id: 'n5_ame', char: '雨', romaji: 'ame', type: 'kanji', meanings: ['rain'] },
+  { id: 'n5_den', char: '電', romaji: 'den', type: 'kanji', meanings: ['electricity'] },
+  { id: 'n5_kuruma', char: '車', romaji: 'kuruma', type: 'kanji', meanings: ['car', 'vehicle'] },
+  { id: 'n5_kiku', char: '聞', romaji: 'kiku', type: 'kanji', meanings: ['hear', 'listen', 'ask'] },
+  { id: 'n5_taberu', char: '食', romaji: 'taberu', type: 'kanji', meanings: ['eat', 'food'] },
+  { id: 'n5_nomu', char: '飲', romaji: 'nomu', type: 'kanji', meanings: ['drink'] },
+  { id: 'n5_miru', char: '見', romaji: 'miru', type: 'kanji', meanings: ['see', 'look'] },
+  { id: 'n5_iku', char: '行', romaji: 'iku', type: 'kanji', meanings: ['go'] },
+  { id: 'n5_kuru', char: '来', romaji: 'kuru', type: 'kanji', meanings: ['come'] },
+  { id: 'n5_kaeru', char: '帰', romaji: 'kaeru', type: 'kanji', meanings: ['return'] },
+  { id: 'n5_yasumu', char: '休', romaji: 'yasumu', type: 'kanji', meanings: ['rest', 'holiday'] },
+  { id: 'n5_tomo', char: '友', romaji: 'tomo', type: 'kanji', meanings: ['friend'] },
+  { id: 'n5_aida', char: '間', romaji: 'aida', type: 'kanji', meanings: ['between', 'interval'] },
+  { id: 'n5_chichi', char: '父', romaji: 'chichi', type: 'kanji', meanings: ['father'] },
+  { id: 'n5_haha', char: '母', romaji: 'haha', type: 'kanji', meanings: ['mother'] },
+  { id: 'n5_nani', char: '何', romaji: 'nani', type: 'kanji', meanings: ['what'] },
+  { id: 'n5_mai', char: '毎', romaji: 'mai', type: 'kanji', meanings: ['every'] },
+  { id: 'n5_ima', char: '今', romaji: 'ima', type: 'kanji', meanings: ['now'] },
+  { id: 'n5_go_noon', char: '午', romaji: 'go', type: 'kanji', meanings: ['noon'] },
+  { id: 'n5_ato', char: '後', romaji: 'ato', type: 'kanji', meanings: ['after', 'behind'] },
+  { id: 'n5_mae', char: '前', romaji: 'mae', type: 'kanji', meanings: ['before', 'front'] },
+  { id: 'n5_hidari', char: '左', romaji: 'hidari', type: 'kanji', meanings: ['left'] },
+  { id: 'n5_migi', char: '右', romaji: 'migi', type: 'kanji', meanings: ['right'] },
+  { id: 'n5_higashi', char: '東', romaji: 'higashi', type: 'kanji', meanings: ['east'] },
+  { id: 'n5_nishi', char: '西', romaji: 'nishi', type: 'kanji', meanings: ['west'] },
+  { id: 'n5_minami', char: '南', romaji: 'minami', type: 'kanji', meanings: ['south'] },
+  { id: 'n5_kita', char: '北', romaji: 'kita', type: 'kanji', meanings: ['north'] },
+  { id: 'n5_soto', char: '外', romaji: 'soto', type: 'kanji', meanings: ['outside'] },
+  { id: 'n5_kuni', char: '国', romaji: 'kuni', type: 'kanji', meanings: ['country'] },
+  { id: 'n5_yama', char: '山', romaji: 'yama', type: 'kanji', meanings: ['mountain'] },
+  { id: 'n5_kawa', char: '川', romaji: 'kawa', type: 'kanji', meanings: ['river'] },
+  { id: 'n5_ta', char: '田', romaji: 'ta', type: 'kanji', meanings: ['rice field'] },
+  { id: 'n5_ten', char: '天', romaji: 'ten', type: 'kanji', meanings: ['heaven', 'sky'] },
+  { id: 'n5_ki_spirit', char: '気', romaji: 'ki', type: 'kanji', meanings: ['spirit', 'feeling', 'air'] },
+  { id: 'n5_sora', char: '空', romaji: 'sora', type: 'kanji', meanings: ['sky', 'empty'] },
+  { id: 'n5_hanasu', char: '話', romaji: 'hanasu', type: 'kanji', meanings: ['speak', 'talk'] },
+  { id: 'n5_yomu', char: '読', romaji: 'yomu', type: 'kanji', meanings: ['read'] },
+  { id: 'n5_kaku', char: '書', romaji: 'kaku', type: 'kanji', meanings: ['write'] },
+  { id: 'n5_dasu', char: '出', romaji: 'dasu', type: 'kanji', meanings: ['exit', 'put out'] },
+  { id: 'n5_hairu', char: '入', romaji: 'hairu', type: 'kanji', meanings: ['enter'] },
+  { id: 'n5_au', char: '会', romaji: 'au', type: 'kanji', meanings: ['meet'] },
+  { id: 'n5_nagai', char: '長', romaji: 'nagai', type: 'kanji', meanings: ['long'] },
 ];
 
 const DEFAULT_KANJI: CardItem[] = [
@@ -1259,6 +1479,7 @@ const Flashcard = ({
           {revealed ? (
             <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
               <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
+              {meaningsText && <p className="mt-3 text-center text-sm text-zinc-400">{meaningsText}</p>}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center mt-2 h-[84px]">
@@ -1326,10 +1547,13 @@ const Flashcard = ({
                 {promptText}
              </h2>
              <h2 className={`text-6xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-110 -translate-y-4'}`}>
-                {answerText}
-             </h2>
-          </div>
-        </div>
+                 {answerText}
+              </h2>
+           </div>
+           {revealed && meaningsText && (
+             <p className="mt-4 text-center text-sm text-zinc-400 animate-in fade-in duration-300">{meaningsText}</p>
+           )}
+         </div>
 
         <div className="mt-8">
           {!revealed ? (
@@ -1710,7 +1934,12 @@ const SettingsView = ({
             <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Active Categories</h3>
             <Toggle label="Hiragana" checked={settings.hiragana} onChange={(val) => setSettings(s => ({ ...s, hiragana: val }))} />
             <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
-            <Toggle label="Kanji" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
+            <Toggle label="JLPT N5 Kanji" checked={settings.jlptN5Kanji} onChange={(val) => setSettings(s => ({ ...s, jlptN5Kanji: val }))} />
+            <Toggle label="Custom Kanji" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
+            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 mt-6">Kana Variations</h3>
+            <Toggle label="Dakuten" checked={settings.dakuten} onChange={(val) => setSettings(s => ({ ...s, dakuten: val }))} />
+            <Toggle label="Handakuten" checked={settings.handakuten} onChange={(val) => setSettings(s => ({ ...s, handakuten: val }))} />
+            <Toggle label="Yoon" checked={settings.yoon} onChange={(val) => setSettings(s => ({ ...s, yoon: val }))} />
           </>
         )}
       </div>
@@ -1800,6 +2029,8 @@ const SettingsView = ({
           </form>
         )}
 
+        <p className="mb-4 ml-2 text-sm text-zinc-500">Custom kanji stay separate from the built-in JLPT N5 deck.</p>
+
         <div className="space-y-2">
           {customItems.map(item => (
             <div key={item.id} className="flex items-center justify-between bg-zinc-900/50 p-4 rounded-2xl border border-zinc-800/50">
@@ -1834,6 +2065,10 @@ export default function App() {
     hiragana: true,
     katakana: true,
     kanji: true,
+    jlptN5Kanji: true,
+    dakuten: true,
+    handakuten: true,
+    yoon: true,
     soundEnabled: loadStoredSoundEnabled(),
     hapticsEnabled: loadStoredHapticsEnabled(),
   });
@@ -1851,11 +2086,12 @@ export default function App() {
     }
 
     return [
-      ...HIRAGANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...KATAKANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...getEnabledHiraganaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...getEnabledKatakanaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...(settings.jlptN5Kanji ? JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })) : []),
       ...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
     ];
-  }, [customItems, settings.studyMode, wordItems]);
+  }, [customItems, settings, wordItems]);
 
   const activePool = useMemo<CardItem[]>(() => {
     if (settings.studyMode === 'words') {
@@ -1863,8 +2099,9 @@ export default function App() {
     }
 
     const pool: CardItem[] = [];
-    if (settings.hiragana) pool.push(...HIRAGANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
-    if (settings.katakana) pool.push(...KATAKANA.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
+    if (settings.hiragana) pool.push(...getEnabledHiraganaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
+    if (settings.katakana) pool.push(...getEnabledKatakanaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
+    if (settings.jlptN5Kanji) pool.push(...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
     if (settings.kanji) pool.push(...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
     return pool;
   }, [settings, customItems, wordItems]);
