@@ -34,6 +34,14 @@ const RECENT_RESULTS_LIMIT = 10;
 const MIN_RECENT_REVIEWS_FOR_STRONG = 5;
 const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
 const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
+const DEBUG_EXPORT_KEYS = [
+  STATS_STORAGE_KEY,
+  CUSTOM_ITEMS_STORAGE_KEY,
+  WORD_ITEMS_STORAGE_KEY,
+  STUDY_MODE_STORAGE_KEY,
+  SOUND_SETTINGS_KEY,
+  HAPTICS_SETTINGS_KEY,
+] as const;
 
 type PageId = 'recognize' | 'recall' | 'stats' | 'settings';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
@@ -313,6 +321,19 @@ const loadStoredHapticsEnabled = (): boolean => {
   } catch {
     return true;
   }
+};
+
+const buildLocalStorageExport = (): string => {
+  if (typeof window === 'undefined') {
+    return '{}';
+  }
+
+  const payload = DEBUG_EXPORT_KEYS.reduce<Record<string, string | null>>((acc, key) => {
+    acc[key] = window.localStorage.getItem(key);
+    return acc;
+  }, {});
+
+  return JSON.stringify(payload, null, 2);
 };
 
 const getCardStudyMode = (card: CardItem): StudyMode => (
@@ -1853,6 +1874,9 @@ const SettingsView = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isEditingWords, setIsEditingWords] = useState(false);
+  const [storageExport, setStorageExport] = useState('');
+  const [exportMessage, setExportMessage] = useState('');
+  const [showStorageExport, setShowStorageExport] = useState(false);
   const [newItemChar, setNewItemChar] = useState('');
   const [newItemRomaji, setNewItemRomaji] = useState('');
   const [newWordChar, setNewWordChar] = useState('');
@@ -1913,8 +1937,48 @@ const SettingsView = ({
     setWordItems(prev => prev.filter(item => item.id !== id));
   };
 
+  const handleExportStorage = async (): Promise<void> => {
+    const payload = buildLocalStorageExport();
+    setStorageExport(payload);
+    setShowStorageExport(false);
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(payload);
+        setExportMessage('Copied local data to clipboard.');
+        return;
+      } catch {
+        // Fall through to manual copy state below.
+      }
+    }
+
+    setShowStorageExport(true);
+    setExportMessage('Clipboard access was unavailable. Use the text box below to copy manually.');
+  };
+
+  useEffect(() => {
+    if (!exportMessage) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setExportMessage('');
+    }, 2500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [exportMessage]);
+
   return (
     <div className="flex-1 overflow-y-auto pb-24 p-6">
+      {exportMessage && (
+        <div className="sticky top-4 z-20 mb-4 flex justify-center pointer-events-none">
+          <div className="rounded-full border border-emerald-400/25 bg-zinc-950/95 px-4 py-2 text-sm font-medium text-emerald-300 shadow-lg backdrop-blur">
+            {exportMessage}
+          </div>
+        </div>
+      )}
       <h2 className="text-3xl font-bold text-zinc-100 mb-8">Settings</h2>
 
       <div className="mb-8">
@@ -1951,7 +2015,6 @@ const SettingsView = ({
           <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
         )}
       </div>
-
 
       {settings.studyMode === 'words' && (
       <div className="mb-8">
@@ -2051,6 +2114,27 @@ const SettingsView = ({
         </div>
       </div>
       )}
+
+      <div className="mt-8">
+        <div className="mb-4 ml-2">
+          <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Debug Export</h3>
+          <p className="mt-2 text-sm text-zinc-500">Export this device's saved app data so we can diagnose repetition issues.</p>
+        </div>
+        <button
+          onClick={() => { void handleExportStorage(); }}
+          className="w-full rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+        >
+          <span className="block text-zinc-100 font-medium">Copy Saved Data</span>
+          <span className="mt-1 block text-sm text-zinc-500">Includes stats, decks, and study mode settings.</span>
+        </button>
+        {showStorageExport && storageExport && (
+          <textarea
+            readOnly
+            value={storageExport}
+            className="mt-4 min-h-[12rem] w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-300 outline-none"
+          />
+        )}
+      </div>
     </div>
   );
 };
