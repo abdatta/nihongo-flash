@@ -2,8 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { installMockLocalStorage } from './mockLocalStorage';
 
 const SERVICE_WORKER_VERSION = __APP_VERSION__;
+const isMockStorageMode = import.meta.env.MODE === 'mock-storage';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -73,8 +75,16 @@ if (!rootElement) {
   throw new Error('Root element not found');
 }
 
-ReactDOM.createRoot(rootElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const bootstrap = async () => {
+  if (isMockStorageMode) {
+    await installMockLocalStorage();
+  }
+
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  );
+};
+
+void bootstrap();

@@ -22,26 +22,22 @@ import type {
   StatsViewProps,
   StrengthMeta,
 } from './types';
+import {
+  buildStorageSnapshot,
+  CUSTOM_ITEMS_STORAGE_KEY,
+  HAPTICS_SETTINGS_KEY,
+  SETTINGS_STORAGE_KEY,
+  SOUND_SETTINGS_KEY,
+  STATS_STORAGE_KEY,
+  STUDY_MODE_STORAGE_KEY,
+  WORD_ITEMS_STORAGE_KEY,
+} from './storageKeys';
 
-const STATS_STORAGE_KEY = 'nihongo-flash:stats';
-const CUSTOM_ITEMS_STORAGE_KEY = 'nihongo-flash:custom-items';
-const WORD_ITEMS_STORAGE_KEY = 'nihongo-flash:word-items';
-const STUDY_MODE_STORAGE_KEY = 'nihongo-flash:study-mode';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const MIN_EASE = 1.3;
 const DEFAULT_EASE = 2.5;
 const RECENT_RESULTS_LIMIT = 10;
 const MIN_RECENT_REVIEWS_FOR_STRONG = 5;
-const SOUND_SETTINGS_KEY = 'nihongo-flash:sound-enabled';
-const HAPTICS_SETTINGS_KEY = 'nihongo-flash:haptics-enabled';
-const DEBUG_EXPORT_KEYS = [
-  STATS_STORAGE_KEY,
-  CUSTOM_ITEMS_STORAGE_KEY,
-  WORD_ITEMS_STORAGE_KEY,
-  STUDY_MODE_STORAGE_KEY,
-  SOUND_SETTINGS_KEY,
-  HAPTICS_SETTINGS_KEY,
-] as const;
 
 type PageId = 'recognize' | 'recall' | 'stats' | 'settings';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
@@ -328,12 +324,7 @@ const buildLocalStorageExport = (): string => {
     return '{}';
   }
 
-  const payload = DEBUG_EXPORT_KEYS.reduce<Record<string, string | null>>((acc, key) => {
-    acc[key] = window.localStorage.getItem(key);
-    return acc;
-  }, {});
-
-  return JSON.stringify(payload, null, 2);
+  return JSON.stringify(buildStorageSnapshot(window.localStorage), null, 2);
 };
 
 const getCardStudyMode = (card: CardItem): StudyMode => (
@@ -349,6 +340,65 @@ const loadStoredStudyMode = (): StudyMode => {
   } catch {
     return 'characters';
   }
+};
+
+const DEFAULT_SETTINGS: SettingsState = {
+  studyMode: 'characters',
+  hiragana: true,
+  katakana: true,
+  kanji: true,
+  jlptN5Kanji: true,
+  dakuten: true,
+  handakuten: true,
+  yoon: true,
+  soundEnabled: true,
+  hapticsEnabled: true,
+};
+
+const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState> => {
+  if (!storedSettings || typeof storedSettings !== 'object' || Array.isArray(storedSettings)) {
+    return {};
+  }
+
+  const safeSettings = storedSettings as Partial<SettingsState> & Record<string, unknown>;
+
+  return {
+    ...(safeSettings.studyMode === 'words' || safeSettings.studyMode === 'characters' ? { studyMode: safeSettings.studyMode } : {}),
+    ...(typeof safeSettings.hiragana === 'boolean' ? { hiragana: safeSettings.hiragana } : {}),
+    ...(typeof safeSettings.katakana === 'boolean' ? { katakana: safeSettings.katakana } : {}),
+    ...(typeof safeSettings.kanji === 'boolean' ? { kanji: safeSettings.kanji } : {}),
+    ...(typeof safeSettings.jlptN5Kanji === 'boolean' ? { jlptN5Kanji: safeSettings.jlptN5Kanji } : {}),
+    ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
+    ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
+    ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),
+    ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
+    ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
+  };
+};
+
+const loadStoredSettings = (): SettingsState => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_SETTINGS;
+  }
+
+  try {
+    const storedSettingsValue = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (storedSettingsValue) {
+      return {
+        ...DEFAULT_SETTINGS,
+        ...normalizeStoredSettings(JSON.parse(storedSettingsValue)),
+      };
+    }
+  } catch {
+    // Fall back to legacy per-setting keys below.
+  }
+
+  return {
+    ...DEFAULT_SETTINGS,
+    studyMode: loadStoredStudyMode(),
+    soundEnabled: loadStoredSoundEnabled(),
+    hapticsEnabled: loadStoredHapticsEnabled(),
+  };
 };
 
 const normalizeStoredCardItems = (
@@ -2144,18 +2194,8 @@ const SettingsView = ({
 export default function App() {
   const activePage = useActivePage();
   useViewportHeightVar();
-  const [settings, setSettings] = useState<SettingsState>({
-    studyMode: loadStoredStudyMode(),
-    hiragana: true,
-    katakana: true,
-    kanji: true,
-    jlptN5Kanji: true,
-    dakuten: true,
-    handakuten: true,
-    yoon: true,
-    soundEnabled: loadStoredSoundEnabled(),
-    hapticsEnabled: loadStoredHapticsEnabled(),
-  });
+  const isMockStorageMode = import.meta.env.MODE === 'mock-storage';
+  const [settings, setSettings] = useState<SettingsState>(() => loadStoredSettings());
   const [customItems, setCustomItems] = useState<CardItem[]>(() => loadStoredCardItems(CUSTOM_ITEMS_STORAGE_KEY, DEFAULT_KANJI, 'characters', 'kanji'));
   const [wordItems, setWordItems] = useState<CardItem[]>(() => loadStoredCardItems(WORD_ITEMS_STORAGE_KEY, DEFAULT_WORDS, 'words', 'word'));
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -2245,11 +2285,12 @@ export default function App() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
       window.localStorage.setItem(SOUND_SETTINGS_KEY, String(settings.soundEnabled));
     } catch {
-      // Ignore storage write failures so sound preferences stay optional.
+      // Ignore storage write failures so preferences stay optional.
     }
-  }, [settings.soundEnabled]);
+  }, [settings]);
 
   useEffect(() => {
     try {
@@ -2294,6 +2335,13 @@ export default function App() {
 
   return (
     <div className="app-shell flex flex-col max-w-2xl mx-auto bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 overflow-hidden relative shadow-2xl">
+      {isMockStorageMode && (
+        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+          <div className="rounded-full border border-amber-400/30 bg-amber-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-amber-300 shadow-lg backdrop-blur">
+            Mock Storage
+          </div>
+        </div>
+      )}
       
       {/* Header (optional, clean minimal bar) */}
       <div className="h-14 flex items-center justify-center border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md z-10 shrink-0">
