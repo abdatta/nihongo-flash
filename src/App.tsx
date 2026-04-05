@@ -952,29 +952,45 @@ const buildAdaptiveQueue = (
     .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
     .sort((a, b) => b.score - a.score);
 
-  const nonStrongEntries = rankedCards.filter(entry => !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
-  const dueNonStrongCount = nonStrongEntries.filter(entry => entry.isDue).length;
-  const nonStrongCount = nonStrongEntries.length;
-  const introducedCardCount = rankedCards.filter(entry => !entry.isNew).length;
+  const reviewedEntries = rankedCards.filter(entry => !entry.isNew);
+  const dueReviewedEntries = reviewedEntries.filter(entry => entry.isDue);
+  const dueReviewedCount = dueReviewedEntries.length;
+  const weakDueEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket === 'weak');
+  const dueNonStrongEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
+  const introducedCardCount = reviewedEntries.length;
 
   let targetNewCards = introducedCardCount < sessionSize ? 3 : 2;
 
-  if (dueNonStrongCount >= 10 || nonStrongCount >= 20) {
+  if (dueReviewedCount === 0) {
+    targetNewCards = Math.min(2, introducedCardCount < sessionSize ? 3 : 2);
+  } else if (weakDueEntries.length >= 6 || dueNonStrongEntries.length >= 8) {
     targetNewCards = 0;
-  } else if (dueNonStrongCount >= 5 || nonStrongCount >= 12) {
+  } else if (weakDueEntries.length >= 3 || dueNonStrongEntries.length >= 4) {
     targetNewCards = 1;
-  } else if (dueNonStrongCount <= 2 && nonStrongCount <= 5) {
+  } else if (weakDueEntries.length <= 1 && dueNonStrongEntries.length <= 1 && introducedCardCount < sessionSize) {
     targetNewCards = 3;
   } else {
     targetNewCards = 2;
   }
 
-  const maxNewCards = Math.min(3, Math.max(targetNewCards, introducedCardCount < sessionSize ? 3 : 2));
+  const maxNewCards = introducedCardCount < sessionSize ? 3 : 2;
+  const dueLearningEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
+  const dueStrongEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket === 'strong');
+  const futureLearningEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
+  const futureStrongEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket === 'strong');
+  const newEntries = rankedCards.filter(entry => entry.isNew);
+  const prioritizedEntries = [
+    ...dueLearningEntries,
+    ...dueStrongEntries,
+    ...newEntries,
+    ...futureLearningEntries,
+    ...futureStrongEntries,
+  ];
   const selected: CardItem[] = [];
   const selectedIds = new Set();
   let newCardsSelected = 0;
 
-  for (const entry of rankedCards) {
+  for (const entry of prioritizedEntries) {
     if (selected.length >= sessionSize) break;
     if (selectedIds.has(entry.card.id)) continue;
     if (entry.isNew && newCardsSelected >= targetNewCards) continue;
@@ -988,7 +1004,7 @@ const buildAdaptiveQueue = (
   }
 
   if (selected.length < sessionSize) {
-    for (const entry of rankedCards) {
+    for (const entry of prioritizedEntries) {
       if (selected.length >= sessionSize) break;
       if (selectedIds.has(entry.card.id)) continue;
       if (entry.isNew && newCardsSelected >= maxNewCards) continue;
