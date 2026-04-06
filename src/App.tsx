@@ -1674,9 +1674,9 @@ const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) =
       </section>
 
       {selectedItem ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <button type="button" aria-label="Close item details" className="absolute inset-0 cursor-default" onClick={() => setSelectedItem(null)} />
-          <div className="relative z-10 w-full max-w-md rounded-[2rem] border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+          <div className="relative z-10 max-h-[calc(var(--app-height,100vh)-2rem)] w-full max-w-md overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">
