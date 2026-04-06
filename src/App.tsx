@@ -5,9 +5,11 @@ import RecognizePage from './pages/RecognizePage';
 import RecallPage from './pages/RecallPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
+import { DAY_IN_MS, DEFAULT_EASE, MIN_EASE, MIN_RECENT_REVIEWS_FOR_STRONG, RECENT_RESULTS_LIMIT } from './appConstants';
+import { buildLocalStorageExport, createEmptyDirectionStats, loadStoredCardItems, loadStoredSettings, loadStoredStats } from './appPersistence';
+import { useActivePage, useViewportHeightVar } from './appShell';
 import type {
   CardItem,
-  CardStats,
   CardType,
   Direction,
   DirectionStats,
@@ -23,7 +25,6 @@ import type {
   StrengthMeta,
 } from './types';
 import {
-  buildStorageSnapshot,
   CUSTOM_ITEMS_STORAGE_KEY,
   HAPTICS_SETTINGS_KEY,
   SETTINGS_STORAGE_KEY,
@@ -32,14 +33,6 @@ import {
   STUDY_MODE_STORAGE_KEY,
   WORD_ITEMS_STORAGE_KEY,
 } from './storageKeys';
-
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
-const MIN_EASE = 1.3;
-const DEFAULT_EASE = 2.5;
-const RECENT_RESULTS_LIMIT = 10;
-const MIN_RECENT_REVIEWS_FOR_STRONG = 5;
-
-type PageId = 'recognize' | 'recall' | 'stats' | 'settings';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
 type AudioConstructor = typeof AudioContext;
 
@@ -99,235 +92,6 @@ const NAV_PAGES = [
   { id: 'settings', label: 'Settings', icon: Settings, href: '#/settings', title: 'Settings' },
 ];
 
-const normalizePageFromHash = (hash: string): PageId => {
-  const normalizedHash = typeof hash === 'string' ? hash.trim() : '';
-  const route = normalizedHash.replace(/^#/, '') || '/';
-  const pathname = route.startsWith('/') ? route : `/${route}`;
-
-  switch (pathname) {
-    case '/':
-    case '/read':
-    case '/recognize':
-      return 'recognize';
-    case '/write':
-    case '/recall':
-      return 'recall';
-    case '/stats':
-      return 'stats';
-    case '/settings':
-      return 'settings';
-    default:
-      return 'recognize';
-  }
-};
-
-const getCanonicalHash = (hash: string): string | null => {
-  const normalizedHash = typeof hash === 'string' ? hash.trim() : '';
-  const route = normalizedHash.replace(/^#/, '') || '/';
-  const pathname = route.startsWith('/') ? route : `/${route}`;
-
-  switch (pathname) {
-    case '/recognize':
-      return '#/';
-    case '/recall':
-      return '#/write';
-    default:
-      return null;
-  }
-};
-
-const useActivePage = (): PageId => {
-  const [activePage, setActivePage] = useState<PageId>(() => {
-    if (typeof window === 'undefined') return 'recognize';
-    return normalizePageFromHash(window.location.hash);
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-
-    const syncPage = () => {
-      const canonicalHash = getCanonicalHash(window.location.hash);
-      if (canonicalHash && window.location.hash !== canonicalHash) {
-        window.location.replace(`${window.location.pathname}${window.location.search}${canonicalHash}`);
-        return;
-      }
-
-      setActivePage(normalizePageFromHash(window.location.hash));
-    };
-
-    syncPage();
-    window.addEventListener('hashchange', syncPage);
-
-    return () => {
-      window.removeEventListener('hashchange', syncPage);
-    };
-  }, []);
-
-  return activePage;
-};
-
-const useViewportHeightVar = () => {
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-      return undefined;
-    }
-
-    let frameId: number | null = null;
-
-    const syncViewportHeight = () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-
-      frameId = window.requestAnimationFrame(() => {
-        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-        document.documentElement.style.setProperty('--app-height', `${viewportHeight}px`);
-        frameId = null;
-      });
-    };
-
-    syncViewportHeight();
-
-    const visualViewport = window.visualViewport;
-    window.addEventListener('resize', syncViewportHeight);
-    window.addEventListener('orientationchange', syncViewportHeight);
-    window.addEventListener('pageshow', syncViewportHeight);
-    visualViewport?.addEventListener('resize', syncViewportHeight);
-    visualViewport?.addEventListener('scroll', syncViewportHeight);
-
-    return () => {
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId);
-      }
-
-      window.removeEventListener('resize', syncViewportHeight);
-      window.removeEventListener('orientationchange', syncViewportHeight);
-      window.removeEventListener('pageshow', syncViewportHeight);
-      visualViewport?.removeEventListener('resize', syncViewportHeight);
-      visualViewport?.removeEventListener('scroll', syncViewportHeight);
-    };
-  }, []);
-};
-
-const createEmptyDirectionStats = (): DirectionStats => ({
-  streak: 0,
-  reviews: 0,
-  recentResults: [],
-  ease: DEFAULT_EASE,
-  intervalDays: 0,
-  lastReviewedAt: null,
-  dueAt: 0,
-});
-
-const normalizeStats = (storedStats: unknown): StatsMap => {
-  if (!storedStats || typeof storedStats !== 'object' || Array.isArray(storedStats)) {
-    return {};
-  }
-
-  return Object.entries(storedStats as Record<string, unknown>).reduce<StatsMap>((acc, [id, itemStats]) => {
-    if (!itemStats || typeof itemStats !== 'object' || Array.isArray(itemStats)) {
-      return acc;
-    }
-
-    const normalizedDirections = (['k2r', 'r2k'] as Direction[]).reduce<CardStats>((directions, direction) => {
-      const directionStats = (itemStats as Record<string, unknown>)[direction];
-      if (!directionStats || typeof directionStats !== 'object' || Array.isArray(directionStats)) {
-        return directions;
-      }
-
-      const safeDirectionStats = directionStats as Partial<DirectionStats> & Record<string, unknown>;
-      const gotIt = typeof safeDirectionStats.gotIt === 'number' && Number.isFinite(safeDirectionStats.gotIt)
-        ? safeDirectionStats.gotIt
-        : undefined;
-      const missed = typeof safeDirectionStats.missed === 'number' && Number.isFinite(safeDirectionStats.missed)
-        ? safeDirectionStats.missed
-        : undefined;
-      const streak = typeof safeDirectionStats.streak === 'number' && Number.isFinite(safeDirectionStats.streak)
-        ? safeDirectionStats.streak
-        : 0;
-      const reviews = typeof safeDirectionStats.reviews === 'number' && Number.isFinite(safeDirectionStats.reviews)
-        ? safeDirectionStats.reviews
-        : 0;
-      const ease = typeof safeDirectionStats.ease === 'number' && Number.isFinite(safeDirectionStats.ease)
-        ? Math.max(MIN_EASE, safeDirectionStats.ease)
-        : DEFAULT_EASE;
-      const intervalDays = typeof safeDirectionStats.intervalDays === 'number' && Number.isFinite(safeDirectionStats.intervalDays)
-        ? Math.max(0, safeDirectionStats.intervalDays)
-        : 0;
-      const lastReviewedAt = typeof safeDirectionStats.lastReviewedAt === 'number' && Number.isFinite(safeDirectionStats.lastReviewedAt)
-        ? safeDirectionStats.lastReviewedAt
-        : null;
-      const dueAt = typeof safeDirectionStats.dueAt === 'number' && Number.isFinite(safeDirectionStats.dueAt)
-        ? safeDirectionStats.dueAt
-        : (lastReviewedAt !== null ? lastReviewedAt + intervalDays * DAY_IN_MS : 0);
-
-      directions[direction] = {
-        ...(typeof gotIt === 'number' ? { gotIt } : {}),
-        ...(typeof missed === 'number' ? { missed } : {}),
-        streak,
-        reviews,
-        recentResults: Array.isArray(safeDirectionStats.recentResults)
-          ? safeDirectionStats.recentResults.filter((value): value is 0 | 1 => value === 1 || value === 0).slice(-RECENT_RESULTS_LIMIT)
-          : [],
-        ease,
-        intervalDays,
-        lastReviewedAt,
-        dueAt,
-      };
-
-      return directions;
-    }, {});
-
-    if (Object.keys(normalizedDirections).length > 0) {
-      acc[id] = normalizedDirections;
-    }
-
-    return acc;
-  }, {});
-};
-
-const loadStoredStats = (): StatsMap => {
-  if (typeof window === 'undefined') return {};
-
-  try {
-    const storedValue = window.localStorage.getItem(STATS_STORAGE_KEY);
-    if (!storedValue) return {};
-    return normalizeStats(JSON.parse(storedValue));
-  } catch {
-    return {};
-  }
-};
-
-const loadStoredSoundEnabled = (): boolean => {
-  if (typeof window === 'undefined') return true;
-
-  try {
-    const storedValue = window.localStorage.getItem(SOUND_SETTINGS_KEY);
-    return storedValue === null ? true : storedValue === 'true';
-  } catch {
-    return true;
-  }
-};
-
-const loadStoredHapticsEnabled = (): boolean => {
-  if (typeof window === 'undefined') return true;
-
-  try {
-    const storedValue = window.localStorage.getItem(HAPTICS_SETTINGS_KEY);
-    return storedValue === null ? true : storedValue === 'true';
-  } catch {
-    return true;
-  }
-};
-
-const buildLocalStorageExport = (): string => {
-  if (typeof window === 'undefined') {
-    return '{}';
-  }
-
-  return JSON.stringify(buildStorageSnapshot(window.localStorage), null, 2);
-};
-
 const getCardStudyMode = (card: CardItem): StudyMode => (
   card.studyMode ?? (card.type === 'word' ? 'words' : 'characters')
 );
@@ -350,138 +114,6 @@ const formatDueLabel = (directionStats: DirectionStats): string => {
 
   const daysUntilDue = Math.max(1, Math.round(hoursUntilDue / 24));
   return `Due in ${daysUntilDue}d`;
-};
-
-const loadStoredStudyMode = (): StudyMode => {
-  if (typeof window === 'undefined') return 'characters';
-
-  try {
-    const storedValue = window.localStorage.getItem(STUDY_MODE_STORAGE_KEY);
-    return storedValue === 'words' ? 'words' : 'characters';
-  } catch {
-    return 'characters';
-  }
-};
-
-const DEFAULT_SETTINGS: SettingsState = {
-  studyMode: 'characters',
-  hiragana: true,
-  katakana: true,
-  kanji: true,
-  jlptN5Kanji: true,
-  dakuten: true,
-  handakuten: true,
-  yoon: true,
-  soundEnabled: true,
-  hapticsEnabled: true,
-};
-
-const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState> => {
-  if (!storedSettings || typeof storedSettings !== 'object' || Array.isArray(storedSettings)) {
-    return {};
-  }
-
-  const safeSettings = storedSettings as Partial<SettingsState> & Record<string, unknown>;
-
-  return {
-    ...(safeSettings.studyMode === 'words' || safeSettings.studyMode === 'characters' ? { studyMode: safeSettings.studyMode } : {}),
-    ...(typeof safeSettings.hiragana === 'boolean' ? { hiragana: safeSettings.hiragana } : {}),
-    ...(typeof safeSettings.katakana === 'boolean' ? { katakana: safeSettings.katakana } : {}),
-    ...(typeof safeSettings.kanji === 'boolean' ? { kanji: safeSettings.kanji } : {}),
-    ...(typeof safeSettings.jlptN5Kanji === 'boolean' ? { jlptN5Kanji: safeSettings.jlptN5Kanji } : {}),
-    ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
-    ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
-    ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),
-    ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
-    ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
-  };
-};
-
-const loadStoredSettings = (): SettingsState => {
-  if (typeof window === 'undefined') {
-    return DEFAULT_SETTINGS;
-  }
-
-  try {
-    const storedSettingsValue = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (storedSettingsValue) {
-      return {
-        ...DEFAULT_SETTINGS,
-        ...normalizeStoredSettings(JSON.parse(storedSettingsValue)),
-      };
-    }
-  } catch {
-    // Fall back to legacy per-setting keys below.
-  }
-
-  return {
-    ...DEFAULT_SETTINGS,
-    studyMode: loadStoredStudyMode(),
-    soundEnabled: loadStoredSoundEnabled(),
-    hapticsEnabled: loadStoredHapticsEnabled(),
-  };
-};
-
-const normalizeStoredCardItems = (
-  storedItems: unknown,
-  fallbackItems: CardItem[],
-  studyMode: StudyMode,
-  fallbackType: CardType,
-): CardItem[] => {
-  if (!Array.isArray(storedItems)) {
-    return fallbackItems;
-  }
-
-  const normalizedItems = storedItems.reduce<CardItem[]>((acc, item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return acc;
-    }
-
-    const safeItem = item as Partial<CardItem> & Record<string, unknown>;
-    const char = typeof safeItem.char === 'string' ? safeItem.char.trim() : '';
-    const romaji = typeof safeItem.romaji === 'string' ? safeItem.romaji.trim().toLowerCase() : '';
-    if (!char || !romaji) {
-      return acc;
-    }
-
-    const itemType = safeItem.type === 'hiragana' || safeItem.type === 'katakana' || safeItem.type === 'kanji' || safeItem.type === 'word'
-      ? safeItem.type
-      : fallbackType;
-
-    const meanings = Array.isArray(safeItem.meanings)
-      ? safeItem.meanings.filter((meaning): meaning is string => typeof meaning === 'string' && meaning.trim().length > 0).map(meaning => meaning.trim())
-      : [];
-
-    acc.push({
-      id: typeof safeItem.id === 'string' && safeItem.id.trim() ? safeItem.id : `${studyMode}_${Date.now()}_${index}`,
-      char,
-      romaji,
-      type: itemType,
-      studyMode,
-      meanings: studyMode === 'words' ? meanings : undefined,
-    });
-
-    return acc;
-  }, []);
-
-  return normalizedItems.length > 0 ? normalizedItems : fallbackItems;
-};
-
-const loadStoredCardItems = (
-  storageKey: string,
-  fallbackItems: CardItem[],
-  studyMode: StudyMode,
-  fallbackType: CardType,
-): CardItem[] => {
-  if (typeof window === 'undefined') return fallbackItems;
-
-  try {
-    const storedValue = window.localStorage.getItem(storageKey);
-    if (!storedValue) return fallbackItems;
-    return normalizeStoredCardItems(JSON.parse(storedValue), fallbackItems, studyMode, fallbackType);
-  } catch {
-    return fallbackItems;
-  }
 };
 
 const HAPTIC_PATTERNS: Record<FeedbackEffect, number | number[]> = {
@@ -2402,7 +2034,7 @@ export default function App() {
   useViewportHeightVar();
   const isMockStorageMode = import.meta.env.MODE === 'mock-storage';
   const [settings, setSettings] = useState<SettingsState>(() => loadStoredSettings());
-  const [customItems, setCustomItems] = useState<CardItem[]>(() => loadStoredCardItems(CUSTOM_ITEMS_STORAGE_KEY, DEFAULT_KANJI, 'characters', 'kanji'));
+  const [customItems, setCustomItems] = useState<CardItem[]>(() => loadStoredCardItems(CUSTOM_ITEMS_STORAGE_KEY, [], 'characters', 'kanji'));
   const [wordItems, setWordItems] = useState<CardItem[]>(() => loadStoredCardItems(WORD_ITEMS_STORAGE_KEY, DEFAULT_WORDS, 'words', 'word'));
   const audioContextRef = useRef<AudioContext | null>(null);
   const hapticsSupported = useMemo(() => isLikelyHapticsSupported(), []);
@@ -2421,7 +2053,7 @@ export default function App() {
       ...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
       ...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
     ];
-  }, [customItems, settings, wordItems]);
+  }, [customItems, settings.studyMode, wordItems]);
 
   const activePool = useMemo<CardItem[]>(() => {
     if (settings.studyMode === 'words') {

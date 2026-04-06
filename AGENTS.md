@@ -56,9 +56,9 @@ Cards use this shape:
 }
 ```
 
-Built-in data lives in `HIRAGANA`, `KATAKANA`, and `DEFAULT_KANJI` in `src/App.tsx`.
+Built-in data lives in `HIRAGANA`, `KATAKANA`, `JLPT_N5_KANJI`, and `DEFAULT_WORDS` in `src/App.tsx`.
 
-`customItems` is still initialized from `DEFAULT_KANJI`, so the "Kanji / Words (Custom)" category currently includes the built-in kanji list plus any user-added items.
+`customItems` starts empty by default and only contains user-added character items.
 
 ### Practice flow
 
@@ -100,18 +100,18 @@ Do not store UI labels in persisted stats. Persist stable data only.
 
 ## Persistence
 
-Persistence is partial.
-
 Persisted to `localStorage`:
 
 - `stats`
+- `settings`
+- `customItems`
+- `wordItems`
 - sound enabled
 - haptics enabled
 
 Not currently persisted:
 
-- category toggles (`hiragana`, `katakana`, `kanji`)
-- `customItems`
+- no known user-facing settings or deck edits in the current flow
 
 Do not assume refresh-safe persistence exists for all settings.
 

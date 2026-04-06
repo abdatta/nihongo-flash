@@ -7,66 +7,79 @@ import { installMockLocalStorage } from './mockLocalStorage';
 const SERVICE_WORKER_VERSION = __APP_VERSION__;
 const isMockStorageMode = import.meta.env.MODE === 'mock-storage';
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    let hasRefreshedForUpdate = false;
+const registerServiceWorker = async () => {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
 
-    const reloadForUpdate = () => {
-      if (hasRefreshedForUpdate) return;
-      hasRefreshedForUpdate = true;
-      window.location.reload();
+  let hasRefreshedForUpdate = false;
+
+  const reloadForUpdate = () => {
+    if (hasRefreshedForUpdate) return;
+    hasRefreshedForUpdate = true;
+    window.location.reload();
+  };
+
+  try {
+    const serviceWorkerUrl = `${import.meta.env.BASE_URL}sw.js?v=${encodeURIComponent(SERVICE_WORKER_VERSION)}`;
+    const registration = await navigator.serviceWorker.register(serviceWorkerUrl);
+
+    navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
+
+    const activateWorker = (worker: ServiceWorker | null) => {
+      if (!worker) return;
+
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        }
+      });
     };
 
-    const registerServiceWorker = async () => {
-      try {
-        const serviceWorkerUrl = `${import.meta.env.BASE_URL}sw.js?v=${encodeURIComponent(SERVICE_WORKER_VERSION)}`;
-        const registration = await navigator.serviceWorker.register(serviceWorkerUrl);
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
 
-        navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
+    if (registration.installing) {
+      activateWorker(registration.installing);
+    }
 
-        const activateWorker = (worker: ServiceWorker | null) => {
-          if (!worker) return;
+    registration.addEventListener('updatefound', () => {
+      activateWorker(registration.installing);
+    });
 
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-              worker.postMessage({ type: 'SKIP_WAITING' });
-            }
-          });
-        };
+    const checkForUpdates = () => {
+      registration.update().catch(() => {
+        // Ignore update check failures so the app still works offline.
+      });
+    };
 
-        if (registration.waiting) {
-          registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-        }
-
-        if (registration.installing) {
-          activateWorker(registration.installing);
-        }
-
-        registration.addEventListener('updatefound', () => {
-          activateWorker(registration.installing);
-        });
-
-        const checkForUpdates = () => {
-          registration.update().catch(() => {
-            // Ignore update check failures so the app still works offline.
-          });
-        };
-
-        window.setInterval(checkForUpdates, 60 * 1000);
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible') {
-            checkForUpdates();
-          }
-        });
-
+    const visibilityChangeHandler = () => {
+      if (document.visibilityState === 'visible') {
         checkForUpdates();
-      } catch {
-        // Service worker registration is optional during local development.
       }
     };
 
-    registerServiceWorker();
-  });
+    const intervalId = window.setInterval(checkForUpdates, 60 * 1000);
+    const cleanup = () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', visibilityChangeHandler);
+      navigator.serviceWorker.removeEventListener('controllerchange', reloadForUpdate);
+    };
+
+    document.addEventListener('visibilitychange', visibilityChangeHandler);
+    window.addEventListener('pagehide', cleanup, { once: true });
+
+    checkForUpdates();
+  } catch {
+    // Service worker registration is optional during local development.
+  }
+};
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void registerServiceWorker();
+  }, { once: true });
 }
 
 const rootElement = document.getElementById('root');
