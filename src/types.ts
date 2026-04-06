@@ -80,6 +80,7 @@ export type SettingsViewComponent = ComponentType<SettingsViewProps>;
 export interface StatsViewProps {
   stats: StatsMap;
   allItems: CardItem[];
+  activePool: CardItem[];
   studyMode: StudyMode;
 }
 

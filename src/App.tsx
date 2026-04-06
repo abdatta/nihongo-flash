@@ -66,6 +66,7 @@ interface ToneSweepOptions {
 interface AnalyzedStatItem extends CardItem, DirectionStats {
   ratio: number;
   usesRecentWindow: boolean;
+  groupItems: CardItem[];
 }
 
 interface StatSectionProps {
@@ -330,6 +331,26 @@ const buildLocalStorageExport = (): string => {
 const getCardStudyMode = (card: CardItem): StudyMode => (
   card.studyMode ?? (card.type === 'word' ? 'words' : 'characters')
 );
+
+const getItemIdentityKey = (card: CardItem): string => `${getCardStudyMode(card)}::${card.char}::${card.romaji}`;
+
+const formatDueLabel = (directionStats: DirectionStats): string => {
+  if (directionStats.reviews === 0) {
+    return 'Not introduced yet';
+  }
+
+  if (directionStats.dueAt <= Date.now()) {
+    return 'Due now';
+  }
+
+  const hoursUntilDue = Math.max(1, Math.round((directionStats.dueAt - Date.now()) / (60 * 60 * 1000)));
+  if (hoursUntilDue < 24) {
+    return `Due in ${hoursUntilDue}h`;
+  }
+
+  const daysUntilDue = Math.max(1, Math.round(hoursUntilDue / 24));
+  return `Due in ${daysUntilDue}d`;
+};
 
 const loadStoredStudyMode = (): StudyMode => {
   if (typeof window === 'undefined') return 'characters';
@@ -1783,29 +1804,77 @@ const PracticeSession = ({
   );
 };
 
-const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
+const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) => {
   const [activeStatsTab, setActiveStatsTab] = useState<Direction>('k2r');
+  const [selectedItem, setSelectedItem] = useState<AnalyzedStatItem | CardItem | null>(null);
+
+  const activeIdentityKeys = useMemo(() => new Set(activePool.map(item => getItemIdentityKey(item))), [activePool]);
+  const visibleGroups = useMemo(() => {
+    const groupedItems = new Map<string, CardItem[]>();
+
+    allItems.forEach(item => {
+      const key = getItemIdentityKey(item);
+      const existingGroup = groupedItems.get(key);
+      if (existingGroup) {
+        existingGroup.push(item);
+      } else {
+        groupedItems.set(key, [item]);
+      }
+    });
+
+    return Array.from(groupedItems.entries())
+      .filter(([key]) => activeIdentityKeys.has(key))
+      .map(([, items]) => items);
+  }, [activeIdentityKeys, allItems]);
 
   // Helper to compute weak/improving/strong based on a specific direction
   const analyzeStats = (direction: Direction) => {
     const weak: AnalyzedStatItem[] = [];
     const strong: AnalyzedStatItem[] = [];
     const improving: AnalyzedStatItem[] = [];
+    const unintroduced: CardItem[] = [];
 
-    allItems.forEach(item => {
-      const itemStat = getScheduledDirectionStats(stats, item.id, direction);
-      if (itemStat.reviews === 0) return;
+    visibleGroups.forEach(groupItems => {
+      const analyzedItems = groupItems
+        .map(item => {
+          const itemStat = getScheduledDirectionStats(stats, item.id, direction);
+          const strengthMeta = getCardStrengthMeta(itemStat);
 
-      const strengthMeta = getCardStrengthMeta(itemStat);
-      const ratio = strengthMeta.accuracy;
-      const usesRecentWindow = strengthMeta.usesRecentWindow;
+          return {
+            item,
+            itemStat,
+            strengthMeta,
+          };
+        })
+        .sort((a, b) => {
+          if (b.itemStat.reviews !== a.itemStat.reviews) {
+            return b.itemStat.reviews - a.itemStat.reviews;
+          }
+
+          return (b.itemStat.lastReviewedAt ?? 0) - (a.itemStat.lastReviewedAt ?? 0);
+        });
+
+      const introducedItem = analyzedItems.find(entry => entry.itemStat.reviews > 0);
+      if (!introducedItem) {
+        unintroduced.push(groupItems[0]);
+        return;
+      }
+
+      const { item, itemStat, strengthMeta } = introducedItem;
+      const analyzedStatItem: AnalyzedStatItem = {
+        ...item,
+        ...itemStat,
+        ratio: strengthMeta.accuracy,
+        usesRecentWindow: strengthMeta.usesRecentWindow,
+        groupItems,
+      };
 
       if (strengthMeta.bucket === 'weak') {
-        weak.push({ ...item, ...itemStat, ratio, usesRecentWindow });
+        weak.push(analyzedStatItem);
       } else if (strengthMeta.bucket === 'strong') {
-        strong.push({ ...item, ...itemStat, ratio, usesRecentWindow });
+        strong.push(analyzedStatItem);
       } else {
-        improving.push({ ...item, ...itemStat, ratio, usesRecentWindow });
+        improving.push(analyzedStatItem);
       }
     });
 
@@ -1813,11 +1882,12 @@ const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
       weak: weak.sort((a, b) => a.ratio - b.ratio),
       improving: improving.sort((a, b) => b.ratio - a.ratio),
       strong: strong.sort((a, b) => b.ratio - a.ratio),
+      unintroduced: unintroduced.sort((a, b) => a.char.localeCompare(b.char, 'ja')),
     };
   };
 
-  const readingStats = useMemo(() => analyzeStats('k2r'), [stats, allItems]);
-  const writingStats = useMemo(() => analyzeStats('r2k'), [stats, allItems]);
+  const readingStats = useMemo(() => analyzeStats('k2r'), [stats, visibleGroups]);
+  const writingStats = useMemo(() => analyzeStats('r2k'), [stats, visibleGroups]);
 
   const statsTabs: Array<{
     id: Direction;
@@ -1845,6 +1915,57 @@ const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
   const activeTabIndex = statsTabs.findIndex(tab => tab.id === activeStatsTab);
   const activeStats = statsTabs[activeTabIndex] ?? statsTabs[0];
 
+  useEffect(() => {
+    if (!selectedItem) {
+      return undefined;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedItem(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [selectedItem]);
+
+  const StatTile = ({
+    item,
+    colorClass,
+    ratio,
+    usesRecentWindow,
+  }: {
+    item: AnalyzedStatItem | CardItem;
+    colorClass: string;
+    ratio?: number;
+    usesRecentWindow?: boolean;
+  }) => (
+    <button
+      type="button"
+      onClick={() => setSelectedItem(item)}
+      className="relative flex min-w-[4.75rem] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-center transition-colors hover:border-zinc-700 hover:bg-zinc-800/90"
+    >
+      {typeof usesRecentWindow === 'boolean' ? (
+        <span
+          className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${
+            usesRecentWindow ? 'bg-emerald-400' : 'bg-rose-400'
+          }`}
+          title={usesRecentWindow ? 'Using recent reviews' : 'Using older long-term stats'}
+        />
+      ) : null}
+      <span className="mb-1 text-2xl font-bold text-zinc-100">{item.char}</span>
+      {studyMode === 'words' && item.meanings?.length ? (
+        <span className="mb-1 text-center text-xs text-zinc-500">{item.meanings.join(', ')}</span>
+      ) : null}
+      <span className={`text-xs font-bold ${colorClass}`}>
+        {typeof ratio === 'number' ? `${Math.round(ratio * 100)}%` : 'New'}
+      </span>
+    </button>
+  );
+
   const StatSection = ({ title, items, colorClass }: StatSectionProps) => (
     <section className="mb-8 last:mb-0">
       <div className="mb-4 flex items-center justify-between">
@@ -1858,22 +1979,7 @@ const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
       ) : (
         <div className="flex flex-wrap gap-3">
           {items.map(item => (
-            <div
-              key={item.id}
-              className="relative flex min-w-[4.75rem] flex-col items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3"
-            >
-              <span
-                className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${
-                  item.usesRecentWindow ? 'bg-emerald-400' : 'bg-rose-400'
-                }`}
-                title={item.usesRecentWindow ? 'Using recent reviews' : 'Using older long-term stats'}
-              />
-              <span className="mb-1 text-2xl font-bold text-zinc-100">{item.char}</span>
-              {studyMode === 'words' && item.meanings?.length ? (
-                <span className="mb-1 text-center text-xs text-zinc-500">{item.meanings.join(', ')}</span>
-              ) : null}
-              <span className={`text-xs font-bold ${colorClass}`}>{Math.round(item.ratio * 100)}%</span>
-            </div>
+            <StatTile key={item.id} item={item} colorClass={colorClass} ratio={item.ratio} usesRecentWindow={item.usesRecentWindow} />
           ))}
         </div>
       )}
@@ -1917,6 +2023,90 @@ const StatsView = ({ stats, allItems, studyMode }: StatsViewProps) => {
       <StatSection title="Strong" items={activeStats.data.strong} colorClass="text-emerald-400" />
       <StatSection title="Improving" items={activeStats.data.improving} colorClass="text-amber-400" />
       <StatSection title="Needs Work" items={activeStats.data.weak} colorClass="text-rose-400" />
+      <section className="mb-8 last:mb-0">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-2xl font-bold text-zinc-100">Yet to Appear</h3>
+          <span className="text-sm font-medium text-zinc-500">{activeStats.data.unintroduced.length} items</span>
+        </div>
+        {activeStats.data.unintroduced.length === 0 ? (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 text-center text-sm text-zinc-600">
+            Everything visible here has been introduced.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {activeStats.data.unintroduced.map(item => (
+              <StatTile key={item.id} item={item} colorClass="text-sky-400" />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {selectedItem ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center">
+          <button type="button" aria-label="Close item details" className="absolute inset-0 cursor-default" onClick={() => setSelectedItem(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-[2rem] border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">
+                  {studyMode === 'words' ? 'Word Details' : 'Character Details'}
+                </p>
+                <h3 className="mt-3 text-4xl font-bold text-zinc-100">{selectedItem.char}</h3>
+                <p className="mt-2 text-lg text-emerald-300">{selectedItem.romaji}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedItem(null)}
+                className="rounded-full border border-zinc-800 p-2 text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {selectedItem.meanings?.length ? (
+              <div className="mb-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Meanings</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-200">{selectedItem.meanings.join(', ')}</p>
+              </div>
+            ) : null}
+
+            {'ratio' in selectedItem ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Accuracy</p>
+                    <p className="mt-2 text-2xl font-bold text-zinc-100">{Math.round(selectedItem.ratio * 100)}%</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Reviews</p>
+                    <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.reviews}</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Streak</p>
+                    <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.streak}</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Next Review</p>
+                    <p className="mt-2 text-lg font-bold text-zinc-100">{formatDueLabel(selectedItem)}</p>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Classification Basis</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">
+                    {selectedItem.usesRecentWindow ? 'Using recent results for this item.' : 'Using older lifetime stats until there are enough recent reviews.'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Status</p>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">
+                  This item has not been introduced in this practice direction yet.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -2184,14 +2374,14 @@ const SettingsView = ({
       <div className="mt-8">
         <div className="mb-4 ml-2">
           <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Debug Export</h3>
-          <p className="mt-2 text-sm text-zinc-500">Export this device's saved app data so we can diagnose repetition issues.</p>
+          <p className="mt-2 text-sm text-zinc-500">Export this device's saved app data to help diagnose issues.</p>
         </div>
         <button
           onClick={() => { void handleExportStorage(); }}
           className="w-full rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
         >
           <span className="block text-zinc-100 font-medium">Copy Saved Data</span>
-          <span className="mt-1 block text-sm text-zinc-500">Includes stats, decks, and study mode settings.</span>
+          <span className="mt-1 block text-sm text-zinc-500">Please send this data to the developers for assistance.</span>
         </button>
         {showStorageExport && storageExport && (
           <textarea
@@ -2222,13 +2412,13 @@ export default function App() {
 
   const allItems = useMemo<CardItem[]>(() => {
     if (settings.studyMode === 'words') {
-      return wordItems;
+      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
     }
 
     return [
-      ...getEnabledHiraganaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...getEnabledKatakanaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...(settings.jlptN5Kanji ? JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })) : []),
+      ...[...BASE_HIRAGANA, ...HIRAGANA_DAKUTEN, ...HIRAGANA_HANDAKUTEN, ...HIRAGANA_YOON].map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...[...BASE_KATAKANA, ...KATAKANA_DAKUTEN, ...KATAKANA_HANDAKUTEN, ...KATAKANA_YOON].map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
+      ...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
       ...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
     ];
   }, [customItems, settings, wordItems]);
@@ -2373,7 +2563,7 @@ export default function App() {
           <RecognizePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'stats' && (
-          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} studyMode={settings.studyMode} />
+          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} activePool={activePool} studyMode={settings.studyMode} />
         )}
         {activePage === 'settings' && (
           <SettingsPage
