@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
 import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
 import { toKana } from 'wanakana';
 import RecognizePage from './pages/RecognizePage';
@@ -1136,6 +1136,106 @@ const normalizeRomajiResponse = (value: string): string => (
   value.trim().toLowerCase().replace(/\s+/g, ' ')
 );
 
+interface FlashcardShellProps {
+  type: CardType;
+  assessedState: ReviewResult | null;
+  revealed: boolean;
+  padded?: boolean;
+  fixedHeight?: boolean;
+  children: ReactNode;
+}
+
+interface FlashcardBadgesProps {
+  type: CardType;
+  strengthClasses: string;
+  strengthLabel: string;
+  className?: string;
+}
+
+interface RevealButtonProps {
+  onClick: () => void;
+}
+
+interface AssessmentActionsProps {
+  assessedState: ReviewResult | null;
+  onMissed: () => void;
+  onGotIt: () => void;
+  className?: string;
+  missedWidthClass?: string;
+  showGotIt?: boolean;
+}
+
+const FlashcardShell = ({
+  type,
+  assessedState,
+  revealed,
+  padded = true,
+  fixedHeight = false,
+  children,
+}: FlashcardShellProps) => {
+  const paddingClass = padded ? 'p-8' : 'p-6';
+  const heightClass = fixedHeight ? ' min-h-[340px]' : '';
+
+  return (
+    <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(type, assessedState, revealed)} rounded-3xl ${paddingClass} shadow-2xl transition-all duration-300 relative overflow-hidden${heightClass}`}>
+      {children}
+    </div>
+  );
+};
+
+const FlashcardBadges = ({
+  type,
+  strengthClasses,
+  strengthLabel,
+  className = '',
+}: FlashcardBadgesProps) => (
+  <div className={`flex flex-wrap items-center justify-center gap-2 ${className}`.trim()}>
+    <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(type)}`}>
+      {type === 'word' ? 'words' : type}
+    </span>
+    <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthClasses}`}>
+      {strengthLabel}
+    </span>
+  </div>
+);
+
+const RevealButton = ({ onClick }: RevealButtonProps) => (
+  <button
+    onClick={onClick}
+    className="w-full rounded-xl bg-zinc-100 py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors hover:bg-zinc-200"
+  >
+    Reveal
+  </button>
+);
+
+const AssessmentActions = ({
+  assessedState,
+  onMissed,
+  onGotIt,
+  className = '',
+  missedWidthClass = 'flex-1',
+  showGotIt = true,
+}: AssessmentActionsProps) => (
+  <div className={`flex gap-3 ${className}`.trim()}>
+    <button
+      onClick={onMissed}
+      disabled={!!assessedState}
+      className={`${missedWidthClass} flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
+    >
+      <X size={20} /> Missed
+    </button>
+    {showGotIt && (
+      <button
+        onClick={onGotIt}
+        disabled={!!assessedState}
+        className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
+      >
+        <Check size={20} /> Got it
+      </button>
+    )}
+  </div>
+);
+
 const Flashcard = ({
   card,
   direction,
@@ -1189,11 +1289,8 @@ const Flashcard = ({
 
   if (studyMode === 'words' && direction === 'r2k') {
     return (
-      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses('word', assessedState, revealed)} rounded-3xl p-6 shadow-2xl transition-all duration-300 relative overflow-hidden`}>
-        <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
-          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses('word')}`}>words</span>
-          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>{strengthMeta.label}</span>
-        </div>
+      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} padded={false}>
+        <FlashcardBadges type="word" strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} className="mb-5" />
         <div className="mb-6 text-center">
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">Meaning</p>
           <h2 className="text-3xl font-bold leading-tight text-zinc-100">{meaningsText || 'No meaning set'}</h2>
@@ -1223,61 +1320,51 @@ const Flashcard = ({
             </button>
           </div>
         )}
-      </div>
+      </FlashcardShell>
     );
   }
 
   if (studyMode === 'words') {
     return (
-      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses('word', assessedState, revealed)} rounded-3xl p-8 shadow-2xl transition-all duration-300 min-h-[320px] relative overflow-hidden`}>
-        <div className="text-center flex-1 flex flex-col items-center justify-center relative">
-          <div className="absolute top-0 flex flex-wrap items-center justify-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses('word')}`}>words</span>
-            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>{strengthMeta.label}</span>
+      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} fixedHeight>
+        <div className="text-center flex-1 flex flex-col items-center">
+          <FlashcardBadges type="word" strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} />
+          <div className="flex min-h-[176px] w-full flex-1 items-center justify-center">
+            {!revealed ? (
+              <div className="flex flex-col items-center justify-center text-center">
+                <h2 className="text-6xl font-bold text-zinc-100 leading-none">{card.char}</h2>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
+                <h2 className="text-5xl font-bold text-zinc-100 leading-none">{card.char}</h2>
+                <p className="mt-5 text-2xl font-semibold text-emerald-300">{card.romaji}</p>
+                <p className="mt-4 text-base text-zinc-300">{meaningsText}</p>
+              </div>
+            )}
           </div>
+        </div>
+        <div>
           {!revealed ? (
-            <div className="flex flex-col items-center justify-center mt-4 h-32">
-              <h2 className="text-6xl font-bold text-zinc-100 leading-none">{card.char}</h2>
-            </div>
+            <RevealButton onClick={handleReveal} />
           ) : (
-            <div className="flex flex-col items-center justify-center mt-4 text-center animate-in fade-in duration-300">
-              <h2 className="text-5xl font-bold text-zinc-100 leading-none">{card.char}</h2>
-              <p className="mt-4 text-2xl font-semibold text-emerald-300">{card.romaji}</p>
-              <p className="mt-3 text-base text-zinc-300">{meaningsText}</p>
-            </div>
+            <AssessmentActions
+              assessedState={assessedState}
+              onMissed={() => handleAssess('missed')}
+              onGotIt={() => handleAssess('gotIt')}
+              className="animate-in fade-in duration-300"
+            />
           )}
         </div>
-        <div className="mt-8">
-          {!revealed ? (
-            <button onClick={handleReveal} className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md">Reveal</button>
-          ) : (
-            <div className="flex gap-3 animate-in fade-in duration-300">
-              <button onClick={() => handleAssess('missed')} disabled={!!assessedState} className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}>
-                <X size={20} /> Missed
-              </button>
-              <button onClick={() => handleAssess('gotIt')} disabled={!!assessedState} className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}>
-                <Check size={20} /> Got it
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+      </FlashcardShell>
     );
   }
 
   // Specific rendering for Romaji -> Kana (includes drawing pad)
   if (direction === 'r2k') {
     return (
-      <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-6 shadow-2xl transition-all duration-300 relative overflow-hidden`}>
+      <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} padded={false}>
         <div className="text-center mb-4 flex flex-col items-center min-h-[110px] justify-end">
-          <div className="mb-auto flex flex-wrap items-center justify-center gap-2">
-            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
-              {card.type}
-            </span>
-            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>
-              {strengthMeta.label}
-            </span>
-          </div>
+          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} className="mb-auto" />
           {revealed ? (
             <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
               <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
@@ -1299,94 +1386,57 @@ const Flashcard = ({
         </div>
 
         {!revealed ? (
-          <button 
-            onClick={handleReveal}
-            className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md"
-          >
-            Reveal
-          </button>
+          <RevealButton onClick={handleReveal} />
         ) : (
-          <div className="flex gap-3 animate-in slide-in-from-bottom-4 duration-300">
-             <button 
-              onClick={() => handleAssess('missed')}
-              disabled={!!assessedState}
-              className={`flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors ${hadDrawingOnReveal ? 'flex-1' : 'w-full'}
-                ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
-            >
-              <X size={20} /> Missed
-            </button>
-            {hadDrawingOnReveal && (
-              <button 
-                onClick={() => handleAssess('gotIt')}
-                disabled={!!assessedState}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
-                  ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
-              >
-                <Check size={20} /> Got it
-              </button>
-            )}
-          </div>
+          <AssessmentActions
+            assessedState={assessedState}
+            onMissed={() => handleAssess('missed')}
+            onGotIt={() => handleAssess('gotIt')}
+            className="animate-in slide-in-from-bottom-4 duration-300"
+            missedWidthClass={hadDrawingOnReveal ? 'flex-1' : 'w-full'}
+            showGotIt={hadDrawingOnReveal}
+          />
         )}
-      </div>
+      </FlashcardShell>
     );
   }
 
   // Specific rendering for Kana -> Romaji (simple flip)
   return (
-    <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(card.type, assessedState, revealed)} rounded-3xl p-8 shadow-2xl transition-all duration-300 min-h-[320px] relative overflow-hidden`}>
-        <div className="text-center flex-1 flex flex-col items-center justify-center relative">
-          <div className="absolute top-0 flex flex-wrap items-center justify-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(card.type)}`}>
-              {card.type}
-            </span>
-            <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthMeta.classes}`}>
-              {strengthMeta.label}
-            </span>
-          </div>
-          
-          <div className="relative w-full h-32 flex items-center justify-center mt-4">
-             <h2 className={`text-8xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-0 scale-90 translate-y-4' : 'opacity-100 scale-100 translate-y-0'}`}>
-                {promptText}
-             </h2>
-             <h2 className={`text-6xl font-bold text-zinc-100 transition-all duration-500 absolute ${revealed ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-110 -translate-y-4'}`}>
-                 {answerText}
-              </h2>
-           </div>
-           {revealed && meaningsText && (
-             <p className="mt-4 text-center text-sm text-zinc-400 animate-in fade-in duration-300">{meaningsText}</p>
-           )}
-         </div>
+    <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} fixedHeight>
+        <div className="text-center flex-1 flex flex-col items-center">
+          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} />
 
-        <div className="mt-8">
+          <div className="flex min-h-[176px] w-full flex-1 items-center justify-center">
+            {!revealed ? (
+              <div className="flex items-center justify-center text-center">
+                <h2 className="text-8xl font-bold text-zinc-100 leading-none">{promptText}</h2>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
+                <h2 className="text-5xl font-bold text-zinc-100 leading-none">{promptText}</h2>
+                <p className="mt-5 text-4xl font-semibold text-emerald-300">{answerText}</p>
+                {meaningsText && (
+                  <p className="mt-4 text-center text-sm text-zinc-400">{meaningsText}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
           {!revealed ? (
-            <button 
-              onClick={handleReveal}
-              className="w-full py-4 bg-zinc-100 text-zinc-950 rounded-xl font-bold text-lg hover:bg-zinc-200 transition-colors shadow-md"
-            >
-              Reveal
-            </button>
+            <RevealButton onClick={handleReveal} />
           ) : (
-            <div className="flex gap-3 animate-in fade-in duration-300">
-               <button 
-                onClick={() => handleAssess('missed')}
-                disabled={!!assessedState}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
-                  ${assessedState === 'missed' ? 'bg-rose-500 text-white' : 'bg-zinc-900 text-rose-400 hover:bg-rose-500/20'}`}
-              >
-                <X size={20} /> Missed
-              </button>
-              <button 
-                onClick={() => handleAssess('gotIt')}
-                disabled={!!assessedState}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-lg transition-colors
-                  ${assessedState === 'gotIt' ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-emerald-400 hover:bg-emerald-500/20'}`}
-              >
-                <Check size={20} /> Got it
-              </button>
-            </div>
+            <AssessmentActions
+              assessedState={assessedState}
+              onMissed={() => handleAssess('missed')}
+              onGotIt={() => handleAssess('gotIt')}
+              className="animate-in fade-in duration-300"
+            />
           )}
         </div>
-    </div>
+    </FlashcardShell>
   );
 };
 
