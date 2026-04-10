@@ -155,6 +155,9 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
     ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
     ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
     ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),
+    ...(typeof safeSettings.experimentalDeckBuilderEnabled === 'boolean'
+      ? { experimentalDeckBuilderEnabled: safeSettings.experimentalDeckBuilderEnabled }
+      : {}),
     ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
     ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
   };

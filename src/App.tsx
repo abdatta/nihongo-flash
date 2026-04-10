@@ -594,6 +594,68 @@ const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined):
   };
 };
 
+const shuffleCards = (cards: CardItem[]): CardItem[] => {
+  const shuffled = [...cards];
+
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  return shuffled;
+};
+
+const pickRandomCards = (cards: CardItem[], count: number): CardItem[] => (
+  shuffleCards(cards).slice(0, Math.max(0, count))
+);
+
+const buildExperimentalQueue = (
+  activePool: CardItem[],
+  stats: StatsMap,
+  direction: Direction,
+  sessionSize = 15,
+): CardItem[] => {
+  if (activePool.length <= sessionSize) {
+    return shuffleCards(activePool);
+  }
+
+  const buckets = activePool.reduce<Record<StrengthMeta['bucket'], CardItem[]>>((acc, card) => {
+    const directionStats = getScheduledDirectionStats(stats, card.id, direction);
+    const { bucket } = getCardStrengthMeta(directionStats);
+    acc[bucket].push(card);
+    return acc;
+  }, {
+    new: [],
+    weak: [],
+    improving: [],
+    strong: [],
+  });
+
+  const baseStrongTarget = Math.min(3, buckets.strong.length);
+  const nonStrongTarget = sessionSize - baseStrongTarget;
+  const learningPoolSize = buckets.weak.length + buckets.improving.length;
+  const learningTarget = Math.min(nonStrongTarget, learningPoolSize);
+  const remainingAfterLearning = nonStrongTarget - learningTarget;
+  const newTarget = Math.min(2, remainingAfterLearning, buckets.new.length);
+  const remainingAfterNew = remainingAfterLearning - newTarget;
+  const extraStrongPoolSize = Math.max(0, buckets.strong.length - baseStrongTarget);
+  const extraStrongTarget = Math.min(remainingAfterNew, extraStrongPoolSize);
+  const remainingAfterExtraStrong = remainingAfterNew - extraStrongTarget;
+  const extraNewTarget = Math.min(remainingAfterExtraStrong, Math.max(0, buckets.new.length - newTarget));
+  const strongTarget = baseStrongTarget + extraStrongTarget;
+  const weakTarget = Math.min(buckets.weak.length, learningTarget);
+  const improvingTarget = Math.min(buckets.improving.length, learningTarget - weakTarget);
+
+  const selected = [
+    ...pickRandomCards(buckets.strong, strongTarget),
+    ...pickRandomCards(buckets.weak, weakTarget),
+    ...pickRandomCards(buckets.improving, improvingTarget),
+    ...pickRandomCards(buckets.new, newTarget + extraNewTarget),
+  ];
+
+  return shuffleCards(selected);
+};
+
 const buildAdaptiveQueue = (
   activePool: CardItem[],
   stats: StatsMap,
@@ -1333,6 +1395,7 @@ const PracticeSession = ({
   studyMode,
   direction,
   stats,
+  experimentalDeckBuilderEnabled,
   onUpdateStats,
   onPlaySound,
   onTriggerHaptics,
@@ -1342,11 +1405,14 @@ const PracticeSession = ({
   const [sessionActive, setSessionActive] = useState(() => activePool.length > 0);
 
   const startSession = useCallback(() => {
-    // Prioritize due, weak, and new cards to support spaced repetition.
-    setQueue(buildAdaptiveQueue(activePool, stats, direction, 15));
+    setQueue(
+      experimentalDeckBuilderEnabled
+        ? buildExperimentalQueue(activePool, stats, direction, 15)
+        : buildAdaptiveQueue(activePool, stats, direction, 15),
+    );
     setCurrentIndex(0);
     setSessionActive(true);
-  }, [activePool, stats, direction]);
+  }, [activePool, stats, direction, experimentalDeckBuilderEnabled]);
 
   // Initial auto-start if pool is available
   useEffect(() => {
@@ -1436,7 +1502,14 @@ const PracticeSession = ({
   );
 };
 
-const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) => {
+const StatsView = ({
+  stats,
+  allItems,
+  activePool,
+  studyMode,
+  onResetStatCategory,
+  onResetStatItem,
+}: StatsViewProps) => {
   const [activeStatsTab, setActiveStatsTab] = useState<Direction>('k2r');
   const [selectedItem, setSelectedItem] = useState<AnalyzedStatItem | CardItem | null>(null);
 
@@ -1564,6 +1637,41 @@ const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) =
     };
   }, [selectedItem]);
 
+  const getVisibleItemIds = useCallback((item: AnalyzedStatItem | CardItem): string[] => (
+    'groupItems' in item ? item.groupItems.map(groupItem => groupItem.id) : [item.id]
+  ), []);
+
+  const handleResetCategory = useCallback((title: string, items: AnalyzedStatItem[]) => {
+    if (items.length === 0) {
+      return;
+    }
+
+    const message = `Reset ${items.length} ${items.length === 1 ? 'item' : 'items'} in ${title} for this tab?`;
+    if (typeof window !== 'undefined' && !window.confirm(message)) {
+      return;
+    }
+
+    const cardIds = Array.from(new Set(items.flatMap(item => getVisibleItemIds(item))));
+    onResetStatCategory(cardIds, activeStatsTab);
+    setSelectedItem(current => (
+      current && cardIds.includes(current.id) ? null : current
+    ));
+  }, [activeStatsTab, getVisibleItemIds, onResetStatCategory]);
+
+  const handleResetSelectedItem = useCallback(() => {
+    if (!selectedItem || !('ratio' in selectedItem)) {
+      return;
+    }
+
+    const message = `Reset ${selectedItem.char} for this tab back to new?`;
+    if (typeof window !== 'undefined' && !window.confirm(message)) {
+      return;
+    }
+
+    onResetStatItem(getVisibleItemIds(selectedItem), activeStatsTab);
+    setSelectedItem(null);
+  }, [activeStatsTab, getVisibleItemIds, onResetStatItem, selectedItem]);
+
   const StatTile = ({
     item,
     colorClass,
@@ -1601,7 +1709,17 @@ const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) =
   const StatSection = ({ title, items, colorClass }: StatSectionProps) => (
     <section className="mb-8 last:mb-0">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-2xl font-bold text-zinc-100">{title}</h3>
+        <div className="flex items-center gap-3">
+          <h3 className="text-2xl font-bold text-zinc-100">{title}</h3>
+          <button
+            type="button"
+            onClick={() => handleResetCategory(title, items)}
+            disabled={items.length === 0}
+            className="rounded-full border border-rose-500/30 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.18em] text-rose-300 transition-colors hover:border-rose-400/50 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
+          >
+            Reset
+          </button>
+        </div>
         <span className="text-sm font-medium text-zinc-500">{items.length} items</span>
       </div>
       {items.length === 0 ? (
@@ -1727,6 +1845,13 @@ const StatsView = ({ stats, allItems, activePool, studyMode }: StatsViewProps) =
                     {selectedItem.usesRecentWindow ? 'Using recent results for this item.' : 'Using older lifetime stats until there are enough recent reviews.'}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleResetSelectedItem}
+                  className="w-full rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/15"
+                >
+                  Reset This {studyMode === 'words' ? 'Word' : 'Character'}
+                </button>
               </div>
             ) : (
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -1894,6 +2019,16 @@ const SettingsView = ({
             <Toggle label="Yoon" checked={settings.yoon} onChange={(val) => setSettings(s => ({ ...s, yoon: val }))} />
           </>
         )}
+      </div>
+
+      <div className="mb-8">
+        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Practice</h3>
+        <Toggle
+          label="Experimental Deck Builder"
+          checked={settings.experimentalDeckBuilderEnabled}
+          onChange={(val) => setSettings(s => ({ ...s, experimentalDeckBuilderEnabled: val }))}
+        />
+        <p className="mt-2 ml-2 text-sm text-zinc-500">Mix 3 strong cards with 12 non-strong ones, preferring weak and improving items before new cards.</p>
       </div>
 
       <div className="mb-8">
@@ -2084,6 +2219,33 @@ export default function App() {
     });
   }, []);
 
+  const resetStatsForDirection = useCallback((cardIds: string[], direction: Direction) => {
+    if (cardIds.length === 0) {
+      return;
+    }
+
+    setStats(prev => {
+      const nextStats = { ...prev };
+
+      cardIds.forEach(cardId => {
+        const existingCardStats = nextStats[cardId];
+        if (!existingCardStats || !existingCardStats[direction]) {
+          return;
+        }
+
+        const { [direction]: _removedDirection, ...remainingDirections } = existingCardStats;
+        if (Object.keys(remainingDirections).length === 0) {
+          delete nextStats[cardId];
+          return;
+        }
+
+        nextStats[cardId] = remainingDirections;
+      });
+
+      return nextStats;
+    });
+  }, []);
+
   const playFeedbackSound = useCallback((effectName: FeedbackEffect) => {
     if (!settings.soundEnabled || typeof window === 'undefined') return;
 
@@ -2166,6 +2328,7 @@ export default function App() {
     activePool,
     studyMode: settings.studyMode,
     stats,
+    experimentalDeckBuilderEnabled: settings.experimentalDeckBuilderEnabled,
     onUpdateStats: updateStats,
     onPlaySound: playFeedbackSound,
     onTriggerHaptics: triggerHaptics,
@@ -2195,7 +2358,15 @@ export default function App() {
           <RecognizePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'stats' && (
-          <StatsPage StatsViewComponent={StatsView} stats={stats} allItems={allItems} activePool={activePool} studyMode={settings.studyMode} />
+          <StatsPage
+            StatsViewComponent={StatsView}
+            stats={stats}
+            allItems={allItems}
+            activePool={activePool}
+            studyMode={settings.studyMode}
+            onResetStatCategory={resetStatsForDirection}
+            onResetStatItem={resetStatsForDirection}
+          />
         )}
         {activePage === 'settings' && (
           <SettingsPage

@@ -40,6 +40,7 @@ export interface SettingsState {
   dakuten: boolean;
   handakuten: boolean;
   yoon: boolean;
+  experimentalDeckBuilderEnabled: boolean;
   soundEnabled: boolean;
   hapticsEnabled: boolean;
 }
@@ -57,6 +58,7 @@ export interface PracticeSessionProps {
   studyMode: StudyMode;
   direction: Direction;
   stats: StatsMap;
+  experimentalDeckBuilderEnabled: boolean;
   onUpdateStats: (id: string, result: ReviewResult, direction: Direction) => void;
   onPlaySound?: (effectName: FeedbackEffect) => void;
   onTriggerHaptics?: (effectName: FeedbackEffect) => void;
@@ -82,6 +84,8 @@ export interface StatsViewProps {
   allItems: CardItem[];
   activePool: CardItem[];
   studyMode: StudyMode;
+  onResetStatCategory: (cardIds: string[], direction: Direction) => void;
+  onResetStatItem: (cardIds: string[], direction: Direction) => void;
 }
 
 export type StatsViewComponent = ComponentType<StatsViewProps>;
