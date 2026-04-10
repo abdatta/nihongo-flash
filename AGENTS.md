@@ -224,10 +224,19 @@ When changing behavior:
 
 ### Adding or changing study items
 
-- edit the card arrays in `src/App.tsx`
+- edit the built-in study data in `src/studyData.json`
 - preserve stable unique `id` values
 - keep `romaji` lowercase
 - verify Japanese text with a UTF-8-safe editor and, if needed, in the browser rather than trusting shell output
+
+#### Card ID guidance
+
+- treat `id` as a stable persistence key, not as display data
+- do not derive new `id` values from `romaji` alone for kanji or words
+- kana IDs like `h_ki` and `k_ki` are fine because the script namespace disambiguates them
+- for kanji and words, prefer disambiguated IDs that include meaning or another stable qualifier
+- examples: `n5_ki_tree`, `n5_ki_spirit`, `w_hashi_bridge`, `w_hashi_chopsticks`
+- avoid changing existing built-in IDs casually, since stats and saved progress are keyed by `id`
 
 ### Changing practice or scheduling behavior
 

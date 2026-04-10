@@ -14,6 +14,7 @@ export interface CardItem {
   type: CardType;
   studyMode?: StudyMode;
   meanings?: string[];
+  frequency?: number;
 }
 
 export interface DirectionStats {

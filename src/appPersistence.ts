@@ -198,6 +198,8 @@ const normalizeStoredCardItems = (
     return fallbackItems;
   }
 
+  const fallbackItemsById = new Map(fallbackItems.map(item => [item.id, item] as const));
+
   const normalizedItems = storedItems.reduce<CardItem[]>((acc, item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
       return acc;
@@ -210,6 +212,9 @@ const normalizeStoredCardItems = (
       return acc;
     }
 
+    const itemId = typeof safeItem.id === 'string' && safeItem.id.trim() ? safeItem.id : `${studyMode}_${Date.now()}_${index}`;
+    const fallbackItem = fallbackItemsById.get(itemId);
+
     const itemType = safeItem.type === 'hiragana' || safeItem.type === 'katakana' || safeItem.type === 'kanji' || safeItem.type === 'word'
       ? safeItem.type
       : fallbackType;
@@ -218,13 +223,18 @@ const normalizeStoredCardItems = (
       ? safeItem.meanings.filter((meaning): meaning is string => typeof meaning === 'string' && meaning.trim().length > 0).map(meaning => meaning.trim())
       : [];
 
+    const frequency = typeof safeItem.frequency === 'number' && Number.isFinite(safeItem.frequency)
+      ? safeItem.frequency
+      : (typeof fallbackItem?.frequency === 'number' && Number.isFinite(fallbackItem.frequency) ? fallbackItem.frequency : undefined);
+
     acc.push({
-      id: typeof safeItem.id === 'string' && safeItem.id.trim() ? safeItem.id : `${studyMode}_${Date.now()}_${index}`,
+      id: itemId,
       char,
       romaji,
       type: itemType,
       studyMode,
       meanings: studyMode === 'words' ? meanings : undefined,
+      ...(typeof frequency === 'number' ? { frequency } : {}),
     });
 
     return acc;

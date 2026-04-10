@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:mock-storage": "vite --mode mock-storage",
     "build": "tsc --noEmit && vite build",
+    "generate:frequencies": "node tools/generate-frequencies.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },

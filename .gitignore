@@ -1,3 +1,4 @@
 node_modules/
 dist/
 public/localstorage.debug.json
+.frequency-cache/
