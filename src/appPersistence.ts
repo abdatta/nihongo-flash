@@ -188,7 +188,7 @@ export const loadStoredSettings = (): SettingsState => {
   };
 };
 
-const normalizeStoredCardItems = (
+export const normalizeStoredCardItems = (
   storedItems: unknown,
   fallbackItems: CardItem[],
   studyMode: StudyMode,

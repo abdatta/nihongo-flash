@@ -47,6 +47,12 @@ import {
   getEnabledHiraganaCards,
   getEnabledKatakanaCards,
 } from './studyData';
+import {
+  buildAdaptiveQueueFromRankedEntries,
+  buildExperimentalQueueFromBuckets,
+  pickRandomCards,
+  shuffleCards,
+} from './deckBuilder';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
 type AudioConstructor = typeof AudioContext;
 
@@ -111,24 +117,6 @@ const getCardStudyMode = (card: CardItem): StudyMode => (
 );
 
 const getItemIdentityKey = (card: CardItem): string => `${getCardStudyMode(card)}::${card.char}::${card.romaji}`;
-
-const formatDueLabel = (directionStats: DirectionStats): string => {
-  if (directionStats.reviews === 0) {
-    return 'Not introduced yet';
-  }
-
-  if (directionStats.dueAt <= Date.now()) {
-    return 'Due now';
-  }
-
-  const hoursUntilDue = Math.max(1, Math.round((directionStats.dueAt - Date.now()) / (60 * 60 * 1000)));
-  if (hoursUntilDue < 24) {
-    return `Due in ${hoursUntilDue}h`;
-  }
-
-  const daysUntilDue = Math.max(1, Math.round(hoursUntilDue / 24));
-  return `Due in ${daysUntilDue}d`;
-};
 
 const HAPTIC_PATTERNS: Record<FeedbackEffect, number | number[]> = {
   reveal: 12,
@@ -608,70 +596,6 @@ const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined):
   };
 };
 
-const shuffleCards = (cards: CardItem[]): CardItem[] => {
-  const shuffled = [...cards];
-
-  for (let i = shuffled.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-
-  return shuffled;
-};
-
-const pickRandomCard = (cards: CardItem[]): CardItem | null => {
-  if (cards.length === 0) return null;
-  return cards[Math.floor(Math.random() * cards.length)];
-};
-
-const pickExperimentalNewCards = (cards: CardItem[], count: number): CardItem[] => {
-  const frequencyCards = cards.filter(card => typeof card.frequency === 'number' && Number.isFinite(card.frequency));
-  const nonFrequencyCards = cards.filter(card => typeof card.frequency !== 'number' || !Number.isFinite(card.frequency));
-  const selected: CardItem[] = [];
-
-  const removeCardById = (pool: CardItem[], id: string): CardItem[] => pool.filter(card => card.id !== id);
-
-  let remainingFrequencyCards = [...frequencyCards];
-  let remainingNonFrequencyCards = [...nonFrequencyCards];
-
-  while (selected.length < count && (remainingFrequencyCards.length > 0 || remainingNonFrequencyCards.length > 0)) {
-    const totalRemaining = remainingFrequencyCards.length + remainingNonFrequencyCards.length;
-    const shouldPickFrequencyCard = remainingFrequencyCards.length > 0
-      && (
-        remainingNonFrequencyCards.length === 0
-        || Math.random() < remainingFrequencyCards.length / totalRemaining
-      );
-
-    if (shouldPickFrequencyCard) {
-      const highestFrequency = Math.max(...remainingFrequencyCards.map(card => card.frequency ?? Number.NEGATIVE_INFINITY));
-      const highestFrequencyGroup = remainingFrequencyCards.filter(card => card.frequency === highestFrequency);
-      const selectedCard = pickRandomCard(highestFrequencyGroup);
-
-      if (!selectedCard) {
-        break;
-      }
-
-      selected.push(selectedCard);
-      remainingFrequencyCards = removeCardById(remainingFrequencyCards, selectedCard.id);
-      continue;
-    }
-
-    const selectedCard = pickRandomCard(remainingNonFrequencyCards);
-    if (!selectedCard) {
-      break;
-    }
-
-    selected.push(selectedCard);
-    remainingNonFrequencyCards = removeCardById(remainingNonFrequencyCards, selectedCard.id);
-  }
-
-  return selected;
-};
-
-const pickRandomCards = (cards: CardItem[], count: number): CardItem[] => (
-  shuffleCards(cards).slice(0, Math.max(0, count))
-);
-
 const buildExperimentalQueue = (
   activePool: CardItem[],
   stats: StatsMap,
@@ -694,29 +618,7 @@ const buildExperimentalQueue = (
     strong: [],
   });
 
-  const baseStrongTarget = Math.min(3, buckets.strong.length);
-  const nonStrongTarget = sessionSize - baseStrongTarget;
-  const learningPoolSize = buckets.weak.length + buckets.improving.length;
-  const learningTarget = Math.min(nonStrongTarget, learningPoolSize);
-  const remainingAfterLearning = nonStrongTarget - learningTarget;
-  const newTarget = Math.min(2, remainingAfterLearning, buckets.new.length);
-  const remainingAfterNew = remainingAfterLearning - newTarget;
-  const extraStrongPoolSize = Math.max(0, buckets.strong.length - baseStrongTarget);
-  const extraStrongTarget = Math.min(remainingAfterNew, extraStrongPoolSize);
-  const remainingAfterExtraStrong = remainingAfterNew - extraStrongTarget;
-  const extraNewTarget = Math.min(remainingAfterExtraStrong, Math.max(0, buckets.new.length - newTarget));
-  const strongTarget = baseStrongTarget + extraStrongTarget;
-  const weakTarget = Math.min(buckets.weak.length, learningTarget);
-  const improvingTarget = Math.min(buckets.improving.length, learningTarget - weakTarget);
-
-  const selected = [
-    ...pickRandomCards(buckets.strong, strongTarget),
-    ...pickRandomCards(buckets.weak, weakTarget),
-    ...pickRandomCards(buckets.improving, improvingTarget),
-    ...pickExperimentalNewCards(buckets.new, newTarget + extraNewTarget),
-  ];
-
-  return shuffleCards(selected);
+  return buildExperimentalQueueFromBuckets(buckets, sessionSize);
 };
 
 const buildAdaptiveQueue = (
@@ -730,73 +632,11 @@ const buildAdaptiveQueue = (
     .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
     .sort((a, b) => b.score - a.score);
 
-  const reviewedEntries = rankedCards.filter(entry => !entry.isNew);
-  const dueReviewedEntries = reviewedEntries.filter(entry => entry.isDue);
-  const dueReviewedCount = dueReviewedEntries.length;
-  const weakDueEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket === 'weak');
-  const dueNonStrongEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
-  const introducedCardCount = reviewedEntries.length;
-
-  let targetNewCards = introducedCardCount < sessionSize ? 3 : 2;
-
-  if (dueReviewedCount === 0) {
-    targetNewCards = Math.min(2, introducedCardCount < sessionSize ? 3 : 2);
-  } else if (weakDueEntries.length >= 6 || dueNonStrongEntries.length >= 8) {
-    targetNewCards = 0;
-  } else if (weakDueEntries.length >= 3 || dueNonStrongEntries.length >= 4) {
-    targetNewCards = 1;
-  } else if (weakDueEntries.length <= 1 && dueNonStrongEntries.length <= 1 && introducedCardCount < sessionSize) {
-    targetNewCards = 3;
-  } else {
-    targetNewCards = 2;
-  }
-
-  const maxNewCards = introducedCardCount < sessionSize ? 3 : 2;
-  const dueLearningEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
-  const dueStrongEntries = dueReviewedEntries.filter(entry => getCardStrengthMeta(entry.directionStats).bucket === 'strong');
-  const futureLearningEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket !== 'strong');
-  const futureStrongEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getCardStrengthMeta(entry.directionStats).bucket === 'strong');
-  const newEntries = rankedCards.filter(entry => entry.isNew);
-  const prioritizedEntries = [
-    ...dueLearningEntries,
-    ...dueStrongEntries,
-    ...newEntries,
-    ...futureLearningEntries,
-    ...futureStrongEntries,
-  ];
-  const selected: CardItem[] = [];
-  const selectedIds = new Set();
-  let newCardsSelected = 0;
-
-  for (const entry of prioritizedEntries) {
-    if (selected.length >= sessionSize) break;
-    if (selectedIds.has(entry.card.id)) continue;
-    if (entry.isNew && newCardsSelected >= targetNewCards) continue;
-
-    selected.push(entry.card);
-    selectedIds.add(entry.card.id);
-
-    if (entry.isNew) {
-      newCardsSelected += 1;
-    }
-  }
-
-  if (selected.length < sessionSize) {
-    for (const entry of prioritizedEntries) {
-      if (selected.length >= sessionSize) break;
-      if (selectedIds.has(entry.card.id)) continue;
-      if (entry.isNew && newCardsSelected >= maxNewCards) continue;
-
-      selected.push(entry.card);
-      selectedIds.add(entry.card.id);
-
-      if (entry.isNew) {
-        newCardsSelected += 1;
-      }
-    }
-  }
-
-  return selected;
+  return buildAdaptiveQueueFromRankedEntries(
+    rankedCards,
+    entry => getCardStrengthMeta(entry.directionStats).bucket,
+    sessionSize,
+  );
 };
 
 // --- COMPONENTS ---
@@ -1692,40 +1532,29 @@ const StatsView = ({
                     <p className="mt-2 text-2xl font-bold text-zinc-100">{Math.round(selectedItem.ratio * 100)}%</p>
                   </div>
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Reviews</p>
-                    <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.reviews}</p>
-                  </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Streak</p>
                     <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.streak}</p>
                   </div>
-                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Next Review</p>
-                    <p className="mt-2 text-lg font-bold text-zinc-100">{formatDueLabel(selectedItem)}</p>
-                  </div>
                 </div>
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Classification Basis</p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-300">
-                    {selectedItem.usesRecentWindow ? 'Using recent results for this item.' : 'Using older lifetime stats until there are enough recent reviews.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleResetSelectedItem}
-                  className="w-full rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/15"
-                >
-                  Reset This {studyMode === 'words' ? 'Word' : 'Character'}
-                </button>
               </div>
-            ) : (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Status</p>
-                <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  This item has not been introduced in this practice direction yet.
-                </p>
+            ) : null}
+
+            {typeof selectedItem.frequency === 'number' && Number.isFinite(selectedItem.frequency) ? (
+              <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Frequency in Language</p>
+                <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.frequency.toLocaleString()}</p>
               </div>
-            )}
+            ) : null}
+
+            {'ratio' in selectedItem ? (
+              <button
+                type="button"
+                onClick={handleResetSelectedItem}
+                className="mt-3 w-full rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm font-bold text-rose-200 transition-colors hover:border-rose-400/50 hover:bg-rose-500/15"
+              >
+                Reset This {studyMode === 'words' ? 'Word' : 'Character'}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
