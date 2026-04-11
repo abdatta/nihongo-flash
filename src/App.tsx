@@ -23,6 +23,7 @@ import type {
   StatsMap,
   StatsViewProps,
   StrengthMeta,
+  KanjiReadingType,
 } from './types';
 import {
   CUSTOM_ITEMS_STORAGE_KEY,
@@ -804,6 +805,7 @@ interface FlashcardBadgesProps {
   type: CardType;
   strengthClasses: string;
   strengthLabel: string;
+  readingType?: KanjiReadingType;
   className?: string;
 }
 
@@ -842,17 +844,90 @@ const FlashcardBadges = ({
   type,
   strengthClasses,
   strengthLabel,
+  readingType,
   className = '',
 }: FlashcardBadgesProps) => (
   <div className={`flex flex-wrap items-center justify-center gap-2 ${className}`.trim()}>
     <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${getTypeBadgeClasses(type)}`}>
       {type === 'word' ? 'words' : type}
     </span>
+    {type === 'kanji' && readingType && (
+      <span
+        className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase border ${
+          readingType === 'onyomi'
+            ? 'border-[#def967]/35 bg-[#def967]/12 text-[#def967]'
+            : 'border-orange-400/30 bg-orange-500/15 text-orange-300'
+        }`}
+        title={readingType === 'onyomi' ? 'Onyomi reading' : 'Kunyomi reading'}
+      >
+        {readingType === 'onyomi' ? 'On' : 'Kun'}
+      </span>
+    )}
     <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase ${strengthClasses}`}>
       {strengthLabel}
     </span>
   </div>
 );
+
+const getKanjiReadingToneClasses = (readingType?: KanjiReadingType): string => {
+  if (readingType === 'onyomi') {
+    return 'text-[#def967]';
+  }
+
+  if (readingType === 'kunyomi') {
+    return 'text-orange-300';
+  }
+
+  return 'text-emerald-300';
+};
+
+interface RomajiDisplayProps {
+  card: CardItem;
+  className: string;
+}
+
+const RomajiDisplay = ({ card, className }: RomajiDisplayProps) => {
+  if (card.type !== 'kanji') {
+    return <p className={className}>{card.romaji}</p>;
+  }
+
+  const highlightClass = getKanjiReadingToneClasses(card.readingType);
+  const normalizedRange = Array.isArray(card.readingRange) && card.readingRange.length === 2
+    ? [
+      Math.max(0, Math.min(card.romaji.length, card.readingRange[0])),
+      Math.max(0, Math.min(card.romaji.length, card.readingRange[1])),
+    ] as const
+    : null;
+
+  if (!normalizedRange || normalizedRange[0] >= normalizedRange[1]) {
+    return <p className={`${className} ${highlightClass}`.trim()}>{card.romaji}</p>;
+  }
+
+  const [rangeStart, rangeEnd] = normalizedRange;
+  const beforeReading = card.romaji.slice(0, rangeStart);
+  const readingPart = card.romaji.slice(rangeStart, rangeEnd);
+  const afterReading = card.romaji.slice(rangeEnd);
+
+  return (
+    <p className={className}>
+      {beforeReading && (
+        <>
+          <span className="text-zinc-300">{beforeReading}</span>
+          <span className="mx-0.5 text-zinc-500">·</span>
+        </>
+      )}
+      <span className={`${highlightClass} underline decoration-2 underline-offset-[0.18em]`}>
+        {readingPart}
+      </span>
+      {afterReading && (
+        <>
+          <span className="mx-0.5 text-zinc-500">·</span>
+          <span className="text-zinc-300">{afterReading}</span>
+        </>
+      )}
+    </p>
+  );
+};
 
 const RevealButton = ({ onClick }: RevealButtonProps) => (
   <button
@@ -992,7 +1067,7 @@ const Flashcard = ({
             ) : (
               <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
                 <h2 className="text-5xl font-bold text-zinc-100 leading-none">{card.char}</h2>
-                <p className="mt-5 text-2xl font-semibold text-emerald-300">{card.romaji}</p>
+                <RomajiDisplay card={card} className="mt-5 text-2xl font-semibold" />
                 <p className="mt-4 text-base text-zinc-300">{meaningsText}</p>
               </div>
             )}
@@ -1019,7 +1094,7 @@ const Flashcard = ({
     return (
       <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} padded={false}>
         <div className="text-center mb-4 flex flex-col items-center min-h-[110px] justify-end">
-          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} className="mb-auto" />
+          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} readingType={card.readingType} className="mb-auto" />
           {revealed ? (
             <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
               <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
@@ -1027,7 +1102,7 @@ const Flashcard = ({
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center mt-2 h-[84px]">
-              <h2 className="text-5xl font-bold text-zinc-100 leading-none">{promptText}</h2>
+              <RomajiDisplay card={card} className="text-5xl font-bold leading-none" />
             </div>
           )}
         </div>
@@ -1060,7 +1135,7 @@ const Flashcard = ({
   return (
     <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} fixedHeight>
         <div className="text-center flex-1 flex flex-col items-center">
-          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} />
+          <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} readingType={card.readingType} />
 
           <div className="flex min-h-[176px] w-full flex-1 items-center justify-center">
             {!revealed ? (
@@ -1070,7 +1145,7 @@ const Flashcard = ({
             ) : (
               <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
                 <h2 className="text-5xl font-bold text-zinc-100 leading-none">{promptText}</h2>
-                <p className="mt-5 text-4xl font-semibold text-emerald-300">{answerText}</p>
+                <RomajiDisplay card={card} className="mt-5 text-4xl font-semibold" />
                 {meaningsText && (
                   <p className="mt-4 text-center text-sm text-zinc-400">{meaningsText}</p>
                 )}
@@ -1521,7 +1596,7 @@ const StatsView = ({
                   {studyMode === 'words' ? 'Word Details' : 'Character Details'}
                 </p>
                 <h3 className="mt-3 text-4xl font-bold text-zinc-100">{selectedItem.char}</h3>
-                <p className="mt-2 text-lg text-emerald-300">{selectedItem.romaji}</p>
+                <RomajiDisplay card={selectedItem} className="mt-2 text-lg font-medium" />
               </div>
               <button
                 type="button"

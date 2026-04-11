@@ -6,6 +6,7 @@ export type Direction = 'k2r' | 'r2k';
 export type ReviewResult = 'gotIt' | 'missed';
 export type FeedbackEffect = 'reveal' | ReviewResult;
 export type StrengthBucket = 'new' | 'weak' | 'strong' | 'improving';
+export type KanjiReadingType = 'onyomi' | 'kunyomi';
 
 export interface CardItem {
   id: string;
@@ -15,6 +16,10 @@ export interface CardItem {
   studyMode?: StudyMode;
   meanings?: string[];
   frequency?: number;
+  // Kanji cards can mark which part of the displayed romaji belongs to the kanji itself.
+  // The range is [start, end), so it can represent readings at the start, middle, or end.
+  readingType?: KanjiReadingType;
+  readingRange?: [number, number];
 }
 
 export interface DirectionStats {

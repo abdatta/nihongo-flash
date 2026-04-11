@@ -31,4 +31,23 @@ describe('study data frequency wiring', () => {
 
     expect(card?.frequency).toBe(studyFrequencies.n5_mizu);
   });
+
+  it('keeps kanji reading metadata on the card entries themselves', () => {
+    JLPT_N5_KANJI.forEach((card) => {
+      expect(card.readingType === 'onyomi' || card.readingType === 'kunyomi').toBe(true);
+
+      if (!card.readingRange) {
+        return;
+      }
+
+      expect(card.readingRange).toHaveLength(2);
+      const [start, end] = card.readingRange;
+
+      expect(Number.isInteger(start)).toBe(true);
+      expect(Number.isInteger(end)).toBe(true);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      expect(end).toBeLessThanOrEqual(card.romaji.length);
+    });
+  });
 });

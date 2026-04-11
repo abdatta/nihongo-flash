@@ -53,8 +53,15 @@ Cards use this shape:
   char: string
   romaji: string
   type: 'hiragana' | 'katakana' | 'kanji'
+  readingType?: 'onyomi' | 'kunyomi'
+  readingRange?: [number, number]
 }
 ```
+
+For kanji cards, `readingType` and `readingRange` belong on the card item itself.
+
+- `readingRange` is `[start, end)` within `romaji`
+- use `readingRange` only when the kanji reading is part of a longer displayed romaji string
 
 Built-in data lives in `HIRAGANA`, `KATAKANA`, `JLPT_N5_KANJI`, and `DEFAULT_WORDS` in `src/App.tsx`.
 

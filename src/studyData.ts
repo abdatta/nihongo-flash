@@ -15,6 +15,8 @@ interface StudyDataShape {
   defaultWords: CardItem[];
 }
 
+// Study items are the source of truth for kanji reading metadata.
+// Keeping readingType/readingRange on the card itself avoids split-brain data as we add N4/N3 decks.
 const typedStudyData = rawStudyData as StudyDataShape;
 const typedFrequencyMap = frequencyMap as Record<string, number>;
 
