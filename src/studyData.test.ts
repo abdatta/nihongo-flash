@@ -32,6 +32,14 @@ describe('study data frequency wiring', () => {
     expect(card?.frequency).toBe(studyFrequencies.n5_mizu);
   });
 
+  it('keeps matching frequencies across alternate reading entries for the same kanji', () => {
+    const existingCard = JLPT_N5_KANJI.find(item => item.id === 'n5_hi_day');
+    const alternateCard = JLPT_N5_KANJI.find(item => item.id === 'n5_nichi_day');
+
+    expect(existingCard?.frequency).toBe(studyFrequencies.n5_hi_day);
+    expect(alternateCard?.frequency).toBe(studyFrequencies.n5_hi_day);
+  });
+
   it('keeps kanji reading metadata on the card entries themselves', () => {
     JLPT_N5_KANJI.forEach((card) => {
       expect(card.readingType === 'onyomi' || card.readingType === 'kunyomi').toBe(true);
@@ -49,5 +57,11 @@ describe('study data frequency wiring', () => {
       expect(end).toBeGreaterThan(start);
       expect(end).toBeLessThanOrEqual(card.romaji.length);
     });
+  });
+
+  it('keeps N5 kanji ids unique as alternate readings are added', () => {
+    const ids = JLPT_N5_KANJI.map(card => card.id);
+
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

@@ -20,9 +20,31 @@ interface StudyDataShape {
 const typedStudyData = rawStudyData as StudyDataShape;
 const typedFrequencyMap = frequencyMap as Record<string, number>;
 
+const fallbackFrequencyByCharacter = new Map<string, number>();
+
+typedStudyData.jlptN5Kanji.forEach((card) => {
+  const existingFrequency = typedFrequencyMap[card.id];
+  if (typeof existingFrequency !== 'number') {
+    return;
+  }
+
+  const characterKey = `${card.type}::${card.char}`;
+  if (!fallbackFrequencyByCharacter.has(characterKey)) {
+    fallbackFrequencyByCharacter.set(characterKey, existingFrequency);
+  }
+});
+
 const applyFrequencies = (cards: CardItem[]): CardItem[] => cards.map(card => ({
   ...card,
-  ...(typeof typedFrequencyMap[card.id] === 'number' ? { frequency: typedFrequencyMap[card.id] } : {}),
+  ...(() => {
+    const explicitFrequency = typedFrequencyMap[card.id];
+    if (typeof explicitFrequency === 'number') {
+      return { frequency: explicitFrequency };
+    }
+
+    const fallbackFrequency = fallbackFrequencyByCharacter.get(`${card.type}::${card.char}`);
+    return typeof fallbackFrequency === 'number' ? { frequency: fallbackFrequency } : {};
+  })(),
 }));
 
 export const BASE_HIRAGANA: CardItem[] = applyFrequencies(typedStudyData.baseHiragana);

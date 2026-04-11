@@ -152,6 +152,8 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
     ...(typeof safeSettings.katakana === 'boolean' ? { katakana: safeSettings.katakana } : {}),
     ...(typeof safeSettings.kanji === 'boolean' ? { kanji: safeSettings.kanji } : {}),
     ...(typeof safeSettings.jlptN5Kanji === 'boolean' ? { jlptN5Kanji: safeSettings.jlptN5Kanji } : {}),
+    ...(typeof safeSettings.showOnyomi === 'boolean' ? { showOnyomi: safeSettings.showOnyomi } : {}),
+    ...(typeof safeSettings.showKunyomi === 'boolean' ? { showKunyomi: safeSettings.showKunyomi } : {}),
     ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
     ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
     ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),

@@ -117,6 +117,23 @@ const getCardStudyMode = (card: CardItem): StudyMode => (
   card.studyMode ?? (card.type === 'word' ? 'words' : 'characters')
 );
 
+const isKanjiReadingEnabled = (card: CardItem, settings: SettingsState): boolean => {
+  if (card.type !== 'kanji' || !card.readingType) {
+    return true;
+  }
+
+  if (card.readingType === 'onyomi') {
+    return settings.showOnyomi;
+  }
+
+  return settings.showKunyomi;
+};
+
+export const filterActiveCharacterPoolByReading = (
+  cards: CardItem[],
+  settings: SettingsState,
+): CardItem[] => cards.filter(card => isKanjiReadingEnabled(card, settings));
+
 const getItemIdentityKey = (card: CardItem): string => `${getCardStudyMode(card)}::${card.char}::${card.romaji}`;
 
 const HAPTIC_PATTERNS: Record<FeedbackEffect, number | number[]> = {
@@ -1660,6 +1677,9 @@ const SettingsView = ({
   wordItems,
   setWordItems,
   hapticsSupported,
+  showCharacterOptionsSection,
+  showKanjiReadingSettings,
+  showKanaVariationSettings,
 }: {
   settings: SettingsState;
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
@@ -1668,6 +1688,9 @@ const SettingsView = ({
   wordItems: CardItem[];
   setWordItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
   hapticsSupported: boolean;
+  showCharacterOptionsSection: boolean;
+  showKanjiReadingSettings: boolean;
+  showKanaVariationSettings: boolean;
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isEditingWords, setIsEditingWords] = useState(false);
@@ -1797,26 +1820,35 @@ const SettingsView = ({
             <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
             <Toggle label="JLPT N5 Kanji" checked={settings.jlptN5Kanji} onChange={(val) => setSettings(s => ({ ...s, jlptN5Kanji: val }))} />
             <Toggle label="Custom Kanji" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
-            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 mt-6">Kana Variations</h3>
-            <Toggle label="Dakuten" checked={settings.dakuten} onChange={(val) => setSettings(s => ({ ...s, dakuten: val }))} />
-            <Toggle label="Handakuten" checked={settings.handakuten} onChange={(val) => setSettings(s => ({ ...s, handakuten: val }))} />
-            <Toggle label="Yoon" checked={settings.yoon} onChange={(val) => setSettings(s => ({ ...s, yoon: val }))} />
+            {showCharacterOptionsSection && (
+              <>
+                <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 mt-6">Kanji Readings</h3>
+                {showKanjiReadingSettings && (
+                  <>
+                    <Toggle label="Onyomi" checked={settings.showOnyomi} onChange={(val) => setSettings(s => ({ ...s, showOnyomi: val }))} />
+                    <Toggle label="Kunyomi" checked={settings.showKunyomi} onChange={(val) => setSettings(s => ({ ...s, showKunyomi: val }))} />
+                  </>
+                )}
+                {showKanaVariationSettings && (
+                  <>
+                    <Toggle label="Dakuten" checked={settings.dakuten} onChange={(val) => setSettings(s => ({ ...s, dakuten: val }))} />
+                    <Toggle label="Handakuten" checked={settings.handakuten} onChange={(val) => setSettings(s => ({ ...s, handakuten: val }))} />
+                    <Toggle label="Yoon" checked={settings.yoon} onChange={(val) => setSettings(s => ({ ...s, yoon: val }))} />
+                  </>
+                )}
+              </>
+            )}
           </>
         )}
       </div>
 
       <div className="mb-8">
-        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Practice</h3>
+        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Session Experience</h3>
         <Toggle
           label="Experimental Deck Builder"
           checked={settings.experimentalDeckBuilderEnabled}
           onChange={(val) => setSettings(s => ({ ...s, experimentalDeckBuilderEnabled: val }))}
         />
-        <p className="mt-2 ml-2 text-sm text-zinc-500">Mix 3 strong cards with 12 non-strong ones, preferring weak and improving items before new cards.</p>
-      </div>
-
-      <div className="mb-8">
-        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Sound</h3>
         <Toggle label="Practice Sounds" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
         {hapticsSupported && (
           <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
@@ -1865,7 +1897,7 @@ const SettingsView = ({
       </div>
       )}
 
-      {settings.studyMode === 'characters' && (
+      {settings.studyMode === 'characters' && settings.kanji && (
       <div>
         <div className="flex items-center justify-between mb-4 ml-2">
           <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Custom Deck</h3>
@@ -1974,9 +2006,9 @@ export default function App() {
     ];
   }, [customItems, settings.studyMode, wordItems]);
 
-  const activePool = useMemo<CardItem[]>(() => {
-    if (settings.studyMode === 'words') {
-      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
+  const availableCharacterPool = useMemo<CardItem[]>(() => {
+    if (settings.studyMode !== 'characters') {
+      return [];
     }
 
     const pool: CardItem[] = [];
@@ -1985,7 +2017,25 @@ export default function App() {
     if (settings.jlptN5Kanji) pool.push(...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
     if (settings.kanji) pool.push(...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
     return pool;
-  }, [settings, customItems, wordItems]);
+  }, [customItems, settings]);
+
+  const showKanjiReadingSettings = useMemo(() => (
+    availableCharacterPool.some(item => item.type === 'kanji' && typeof item.readingType === 'string')
+  ), [availableCharacterPool]);
+
+  const showKanaVariationSettings = useMemo(() => (
+    availableCharacterPool.some(item => item.type === 'hiragana' || item.type === 'katakana')
+  ), [availableCharacterPool]);
+
+  const showCharacterOptionsSection = showKanjiReadingSettings || showKanaVariationSettings;
+
+  const activePool = useMemo<CardItem[]>(() => {
+    if (settings.studyMode === 'words') {
+      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
+    }
+
+    return filterActiveCharacterPoolByReading(availableCharacterPool, settings);
+  }, [availableCharacterPool, settings, wordItems]);
 
   const updateStats = useCallback((id: string, result: ReviewResult, direction: Direction) => {
     setStats(prev => {
@@ -2162,6 +2212,9 @@ export default function App() {
             wordItems={wordItems}
             setWordItems={setWordItems}
             hapticsSupported={hapticsSupported}
+            showCharacterOptionsSection={showCharacterOptionsSection}
+            showKanjiReadingSettings={showKanjiReadingSettings}
+            showKanaVariationSettings={showKanaVariationSettings}
           />
         )}
       </div>

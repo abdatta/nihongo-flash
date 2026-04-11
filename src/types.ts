@@ -43,6 +43,8 @@ export interface SettingsState {
   katakana: boolean;
   kanji: boolean;
   jlptN5Kanji: boolean;
+  showOnyomi: boolean;
+  showKunyomi: boolean;
   dakuten: boolean;
   handakuten: boolean;
   yoon: boolean;
@@ -81,6 +83,9 @@ export interface SettingsViewProps {
   wordItems: CardItem[];
   setWordItems: Dispatch<SetStateAction<CardItem[]>>;
   hapticsSupported: boolean;
+  showCharacterOptionsSection: boolean;
+  showKanjiReadingSettings: boolean;
+  showKanaVariationSettings: boolean;
 }
 
 export type SettingsViewComponent = ComponentType<SettingsViewProps>;

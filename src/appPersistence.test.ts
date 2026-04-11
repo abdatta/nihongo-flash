@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { normalizeStoredCardItems } from './appPersistence';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadStoredSettings, normalizeStoredCardItems } from './appPersistence';
+import { SETTINGS_STORAGE_KEY } from './storageKeys';
 import type { CardItem } from './types';
 
 describe('normalizeStoredCardItems', () => {
@@ -44,5 +45,42 @@ describe('normalizeStoredCardItems', () => {
     );
 
     expect(normalized[0]).not.toHaveProperty('frequency');
+  });
+});
+
+describe('loadStoredSettings', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('defaults reading filters to enabled when they are missing from older saved settings', () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => (key === SETTINGS_STORAGE_KEY ? JSON.stringify({ jlptN5Kanji: true }) : null),
+      },
+    });
+
+    const settings = loadStoredSettings();
+
+    expect(settings.jlptN5Kanji).toBe(true);
+    expect(settings.showOnyomi).toBe(true);
+    expect(settings.showKunyomi).toBe(true);
+  });
+
+  it('hydrates stored reading filter preferences when present', () => {
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (key: string) => (
+          key === SETTINGS_STORAGE_KEY
+            ? JSON.stringify({ showOnyomi: false, showKunyomi: true })
+            : null
+        ),
+      },
+    });
+
+    const settings = loadStoredSettings();
+
+    expect(settings.showOnyomi).toBe(false);
+    expect(settings.showKunyomi).toBe(true);
   });
 });

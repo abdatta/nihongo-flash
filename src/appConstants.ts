@@ -12,6 +12,8 @@ export const DEFAULT_SETTINGS: SettingsState = {
   katakana: true,
   kanji: true,
   jlptN5Kanji: true,
+  showOnyomi: true,
+  showKunyomi: true,
   dakuten: true,
   handakuten: true,
   yoon: true,
