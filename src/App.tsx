@@ -1292,7 +1292,22 @@ const StatsView = ({
       weak: weak.sort((a, b) => a.ratio - b.ratio),
       improving: improving.sort((a, b) => b.ratio - a.ratio),
       strong: strong.sort((a, b) => b.ratio - a.ratio),
-      unintroduced: unintroduced.sort((a, b) => a.char.localeCompare(b.char, 'ja')),
+      unintroduced: unintroduced.sort((a, b) => {
+        const aFrequency = typeof a.frequency === 'number' ? a.frequency : null;
+        const bFrequency = typeof b.frequency === 'number' ? b.frequency : null;
+        const aHasFrequency = aFrequency !== null;
+        const bHasFrequency = bFrequency !== null;
+
+        if (aHasFrequency && bHasFrequency && aFrequency !== bFrequency) {
+          return bFrequency - aFrequency;
+        }
+
+        if (aHasFrequency !== bHasFrequency) {
+          return aHasFrequency ? -1 : 1;
+        }
+
+        return a.char.localeCompare(b.char, 'ja');
+      }),
     };
   };
 
