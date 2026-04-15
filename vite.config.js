@@ -1,15 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const repositoryName = process.env.GITHUB_REPOSITORY?.split('/')[1];
-const githubPagesBase =
-  process.env.GITHUB_ACTIONS === 'true' && repositoryName
-    ? `/${repositoryName}/`
-    : '/';
 const appVersion = process.env.GITHUB_SHA || new Date().toISOString();
 
 export default defineConfig({
-  base: githubPagesBase,
+  // Relative asset URLs let the same build work from a custom-domain root
+  // and from a GitHub Pages project path without per-domain config changes.
+  base: './',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
