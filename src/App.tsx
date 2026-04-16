@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, Download, Upload, AlertTriangle } from 'lucide-react';
+import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, AlertTriangle, SquareArrowUpRight, SquareArrowDownRight } from 'lucide-react';
 import { toKana } from 'wanakana';
 import RecognizePage from './pages/RecognizePage';
 import RecallPage from './pages/RecallPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
-import { DAY_IN_MS, DEFAULT_EASE, MIN_EASE, MIN_RECENT_REVIEWS_FOR_STRONG, RECENT_RESULTS_LIMIT } from './appConstants';
+import { DAY_IN_MS, MIN_EASE, MIN_RECENT_REVIEWS_FOR_STRONG, RECENT_RESULTS_LIMIT } from './appConstants';
 import {
   buildLocalStorageExport,
   buildStorageImportPlan,
@@ -63,7 +63,6 @@ import {
 import {
   buildAdaptiveQueueFromRankedEntries,
   buildExperimentalQueueFromBuckets,
-  pickRandomCards,
   shuffleCards,
 } from './deckBuilder';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
@@ -2308,9 +2307,9 @@ const SettingsView = ({
         <div className="space-y-3">
           <button
             onClick={handleExportStorage}
-            className="flex w-full items-start gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+            className="flex w-full items-start md:items-center gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
           >
-            <Download className="mt-0.5 text-emerald-400" size={20} />
+            <SquareArrowUpRight className="mt-0.5 text-emerald-400" size={25} />
             <span>
               <span className="block text-zinc-100 font-medium">Export Saved Data</span>
               <span className="mt-1 block text-sm text-zinc-500">Download a JSON backup of this device&apos;s current progress and settings data.</span>
@@ -2318,9 +2317,9 @@ const SettingsView = ({
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex w-full items-start gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+            className="flex w-full items-start md:items-center gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
           >
-            <Upload className="mt-0.5 text-emerald-400" size={20} />
+            <SquareArrowDownRight className="mt-0.5 text-emerald-400" size={25} />
             <span>
               <span className="block text-zinc-100 font-medium">Import Saved Data</span>
               <span className="mt-1 block text-sm text-zinc-500">Upload an exported backup and merge its progress and settings with current data.</span>
