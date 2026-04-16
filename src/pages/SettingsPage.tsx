@@ -8,6 +8,8 @@ export default function SettingsPage({
   SettingsViewComponent,
   settings,
   setSettings,
+  stats,
+  setStats,
   customItems,
   setCustomItems,
   wordItems,
@@ -21,6 +23,8 @@ export default function SettingsPage({
     <SettingsViewComponent
       settings={settings}
       setSettings={setSettings}
+      stats={stats}
+      setStats={setStats}
       customItems={customItems}
       setCustomItems={setCustomItems}
       wordItems={wordItems}

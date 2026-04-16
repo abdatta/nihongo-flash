@@ -78,6 +78,8 @@ export type PracticeSessionComponent = ComponentType<PracticeSessionProps>;
 export interface SettingsViewProps {
   settings: SettingsState;
   setSettings: Dispatch<SetStateAction<SettingsState>>;
+  stats: StatsMap;
+  setStats: Dispatch<SetStateAction<StatsMap>>;
   customItems: CardItem[];
   setCustomItems: Dispatch<SetStateAction<CardItem[]>>;
   wordItems: CardItem[];

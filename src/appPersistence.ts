@@ -1,13 +1,78 @@
 import {
   buildStorageSnapshot,
+  CUSTOM_ITEMS_STORAGE_KEY,
+  type DebugExportKey,
   HAPTICS_SETTINGS_KEY,
   SETTINGS_STORAGE_KEY,
   SOUND_SETTINGS_KEY,
   STATS_STORAGE_KEY,
   STUDY_MODE_STORAGE_KEY,
+  WORD_ITEMS_STORAGE_KEY,
 } from './storageKeys';
 import { DAY_IN_MS, DEFAULT_EASE, DEFAULT_SETTINGS, MIN_EASE, RECENT_RESULTS_LIMIT } from './appConstants';
 import type { CardItem, CardStats, CardType, Direction, DirectionStats, SettingsState, StudyMode, StatsMap } from './types';
+
+const SETTINGS_FIELDS = [
+  'studyMode',
+  'hiragana',
+  'katakana',
+  'kanji',
+  'jlptN5Kanji',
+  'showOnyomi',
+  'showKunyomi',
+  'dakuten',
+  'handakuten',
+  'yoon',
+  'experimentalDeckBuilderEnabled',
+  'soundEnabled',
+  'hapticsEnabled',
+] as const satisfies ReadonlyArray<keyof SettingsState>;
+
+export type SettingsField = typeof SETTINGS_FIELDS[number];
+export type ImportConflictChoice = 'local' | 'imported';
+
+export interface ImportedAppState {
+  settings: SettingsState;
+  stats: StatsMap;
+  customItems: CardItem[];
+  wordItems: CardItem[];
+}
+
+export type ImportConflict =
+  | {
+    id: string;
+    kind: 'settings';
+    field: SettingsField;
+    localValue: SettingsState[SettingsField];
+    importedValue: SettingsState[SettingsField];
+  }
+  | {
+    id: string;
+    kind: 'customItem' | 'wordItem';
+    itemId: string;
+    localValue: CardItem;
+    importedValue: CardItem;
+  }
+  | {
+    id: string;
+    kind: 'stats';
+    cardId: string;
+    direction: Direction;
+    localValue: DirectionStats;
+    importedValue: DirectionStats;
+  };
+
+export interface StorageImportPlan {
+  importedState: ImportedAppState;
+  mergedState: ImportedAppState;
+  conflicts: ImportConflict[];
+  changes: {
+    settings: number;
+    customItems: number;
+    wordItems: number;
+    stats: number;
+  };
+}
 
 export const createEmptyDirectionStats = (): DirectionStats => ({
   streak: 0,
@@ -128,6 +193,18 @@ export const buildLocalStorageExport = (): string => {
   return JSON.stringify(buildStorageSnapshot(window.localStorage), null, 2);
 };
 
+const tryParseJson = (value: string | null | undefined): unknown => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
 const loadStoredStudyMode = (): StudyMode => {
   if (typeof window === 'undefined') return 'characters';
 
@@ -162,6 +239,26 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
       : {}),
     ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
     ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
+  };
+};
+
+const loadSettingsFromSnapshot = (snapshot: Partial<Record<DebugExportKey, string | null>>): SettingsState => {
+  const storedSettingsValue = snapshot[SETTINGS_STORAGE_KEY];
+  const storedSoundValue = snapshot[SOUND_SETTINGS_KEY];
+  const storedHapticsValue = snapshot[HAPTICS_SETTINGS_KEY];
+
+  if (typeof storedSettingsValue === 'string') {
+    return {
+      ...DEFAULT_SETTINGS,
+      ...normalizeStoredSettings(tryParseJson(storedSettingsValue)),
+    };
+  }
+
+  return {
+    ...DEFAULT_SETTINGS,
+    studyMode: snapshot[STUDY_MODE_STORAGE_KEY] === 'words' ? 'words' : 'characters',
+    soundEnabled: storedSoundValue == null ? DEFAULT_SETTINGS.soundEnabled : storedSoundValue === 'true',
+    hapticsEnabled: storedHapticsValue == null ? DEFAULT_SETTINGS.hapticsEnabled : storedHapticsValue === 'true',
   };
 };
 
@@ -243,6 +340,310 @@ export const normalizeStoredCardItems = (
   }, []);
 
   return normalizedItems.length > 0 ? normalizedItems : fallbackItems;
+};
+
+const isStorageSnapshotLike = (payload: unknown): payload is Partial<Record<DebugExportKey, string | null>> => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+
+  return [
+    STATS_STORAGE_KEY,
+    CUSTOM_ITEMS_STORAGE_KEY,
+    WORD_ITEMS_STORAGE_KEY,
+    SETTINGS_STORAGE_KEY,
+    STUDY_MODE_STORAGE_KEY,
+    SOUND_SETTINGS_KEY,
+    HAPTICS_SETTINGS_KEY,
+  ].some(key => key in payload);
+};
+
+const extractStorageSnapshot = (payload: unknown): Partial<Record<DebugExportKey, string | null>> | null => {
+  if (isStorageSnapshotLike(payload)) {
+    return payload;
+  }
+
+  if (
+    payload
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && 'data' in payload
+    && isStorageSnapshotLike((payload as { data?: unknown }).data)
+  ) {
+    return (payload as { data: Partial<Record<DebugExportKey, string | null>> }).data;
+  }
+
+  return null;
+};
+
+const cloneDirectionStats = (directionStats: DirectionStats): DirectionStats => ({
+  ...directionStats,
+  recentResults: [...directionStats.recentResults],
+});
+
+const cloneStatsMap = (stats: StatsMap): StatsMap => (
+  Object.entries(stats).reduce<StatsMap>((acc, [cardId, cardStats]) => {
+    const nextCardStats: CardStats = {};
+
+    (['k2r', 'r2k'] as Direction[]).forEach(direction => {
+      const directionStats = cardStats[direction];
+      if (directionStats) {
+        nextCardStats[direction] = cloneDirectionStats(directionStats);
+      }
+    });
+
+    if (Object.keys(nextCardStats).length > 0) {
+      acc[cardId] = nextCardStats;
+    }
+
+    return acc;
+  }, {})
+);
+
+const areStringArraysEqual = (left: string[] = [], right: string[] = []): boolean => (
+  left.length === right.length && left.every((value, index) => value === right[index])
+);
+
+const areNumberTupleRangesEqual = (
+  left?: [number, number],
+  right?: [number, number],
+): boolean => (
+  left === right
+  || (
+    Array.isArray(left)
+    && Array.isArray(right)
+    && left.length === 2
+    && right.length === 2
+    && left[0] === right[0]
+    && left[1] === right[1]
+  )
+);
+
+const areCardItemsEqual = (left: CardItem, right: CardItem, studyMode: StudyMode): boolean => (
+  left.id === right.id
+  && left.char === right.char
+  && left.romaji === right.romaji
+  && left.type === right.type
+  && (left.studyMode ?? studyMode) === (right.studyMode ?? studyMode)
+  && areStringArraysEqual(left.meanings ?? [], right.meanings ?? [])
+  && (left.frequency ?? null) === (right.frequency ?? null)
+  && (left.readingType ?? null) === (right.readingType ?? null)
+  && areNumberTupleRangesEqual(left.readingRange, right.readingRange)
+);
+
+const areDirectionStatsEqual = (left: DirectionStats, right: DirectionStats): boolean => (
+  (left.gotIt ?? null) === (right.gotIt ?? null)
+  && (left.missed ?? null) === (right.missed ?? null)
+  && left.streak === right.streak
+  && left.reviews === right.reviews
+  && left.ease === right.ease
+  && left.intervalDays === right.intervalDays
+  && left.lastReviewedAt === right.lastReviewedAt
+  && left.dueAt === right.dueAt
+  && left.recentResults.length === right.recentResults.length
+  && left.recentResults.every((value, index) => value === right.recentResults[index])
+);
+
+export const parseStorageImport = (fileContents: string): ImportedAppState | null => {
+  try {
+    const parsedPayload = JSON.parse(fileContents);
+    const snapshot = extractStorageSnapshot(parsedPayload);
+
+    if (!snapshot) {
+      return null;
+    }
+
+    return {
+      settings: loadSettingsFromSnapshot(snapshot),
+      stats: normalizeStats(tryParseJson(snapshot[STATS_STORAGE_KEY])),
+      customItems: normalizeStoredCardItems(tryParseJson(snapshot[CUSTOM_ITEMS_STORAGE_KEY]), [], 'characters', 'kanji'),
+      wordItems: normalizeStoredCardItems(tryParseJson(snapshot[WORD_ITEMS_STORAGE_KEY]), [], 'words', 'word'),
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const buildStorageImportPlan = (
+  currentState: ImportedAppState,
+  importedState: ImportedAppState,
+): StorageImportPlan => {
+  const conflicts: ImportConflict[] = [];
+  const mergedState: ImportedAppState = {
+    settings: { ...currentState.settings },
+    stats: cloneStatsMap(currentState.stats),
+    customItems: [...currentState.customItems],
+    wordItems: [...currentState.wordItems],
+  };
+  const changes = {
+    settings: 0,
+    customItems: 0,
+    wordItems: 0,
+    stats: 0,
+  };
+
+  SETTINGS_FIELDS.forEach(field => {
+    if (currentState.settings[field] === importedState.settings[field]) {
+      return;
+    }
+
+    changes.settings += 1;
+    conflicts.push({
+      id: `settings:${field}`,
+      kind: 'settings',
+      field,
+      localValue: currentState.settings[field],
+      importedValue: importedState.settings[field],
+    });
+  });
+
+  const mergeItems = (
+    localItems: CardItem[],
+    importedItems: CardItem[],
+    targetItems: CardItem[],
+    studyMode: StudyMode,
+    kind: 'customItem' | 'wordItem',
+  ): number => {
+    const localItemsById = new Map(localItems.map(item => [item.id, item] as const));
+    let mergedCount = 0;
+
+    importedItems.forEach(importedItem => {
+      const localItem = localItemsById.get(importedItem.id);
+
+      if (!localItem) {
+        targetItems.push(importedItem);
+        mergedCount += 1;
+        return;
+      }
+
+      if (areCardItemsEqual(localItem, importedItem, studyMode)) {
+        return;
+      }
+
+      conflicts.push({
+        id: `${kind}:${importedItem.id}`,
+        kind,
+        itemId: importedItem.id,
+        localValue: localItem,
+        importedValue: importedItem,
+      });
+    });
+
+    return mergedCount;
+  };
+
+  changes.customItems = mergeItems(
+    currentState.customItems,
+    importedState.customItems,
+    mergedState.customItems,
+    'characters',
+    'customItem',
+  );
+
+  changes.wordItems = mergeItems(
+    currentState.wordItems,
+    importedState.wordItems,
+    mergedState.wordItems,
+    'words',
+    'wordItem',
+  );
+
+  Object.entries(importedState.stats).forEach(([cardId, importedCardStats]) => {
+    const localCardStats = mergedState.stats[cardId] ?? {};
+    let hasChanges = Boolean(mergedState.stats[cardId]);
+
+    (['k2r', 'r2k'] as Direction[]).forEach(direction => {
+      const importedDirectionStats = importedCardStats[direction];
+      if (!importedDirectionStats) {
+        return;
+      }
+
+      const localDirectionStats = localCardStats[direction];
+      if (!localDirectionStats) {
+        localCardStats[direction] = cloneDirectionStats(importedDirectionStats);
+        hasChanges = true;
+        changes.stats += 1;
+        return;
+      }
+
+      if (areDirectionStatsEqual(localDirectionStats, importedDirectionStats)) {
+        return;
+      }
+
+      conflicts.push({
+        id: `stats:${cardId}:${direction}`,
+        kind: 'stats',
+        cardId,
+        direction,
+        localValue: localDirectionStats,
+        importedValue: importedDirectionStats,
+      });
+    });
+
+    if (hasChanges) {
+      mergedState.stats[cardId] = localCardStats;
+    }
+  });
+
+  return {
+    importedState,
+    mergedState,
+    conflicts,
+    changes,
+  };
+};
+
+export const resolveStorageImportPlan = (
+  plan: StorageImportPlan,
+  conflictChoices: Partial<Record<string, ImportConflictChoice>>,
+): ImportedAppState => {
+  const resolvedState: ImportedAppState = {
+    settings: { ...plan.mergedState.settings },
+    stats: cloneStatsMap(plan.mergedState.stats),
+    customItems: [...plan.mergedState.customItems],
+    wordItems: [...plan.mergedState.wordItems],
+  };
+
+  plan.conflicts.forEach(conflict => {
+    if (conflictChoices[conflict.id] !== 'imported') {
+      return;
+    }
+
+    switch (conflict.kind) {
+      case 'settings':
+        resolvedState.settings = {
+          ...resolvedState.settings,
+          [conflict.field]: conflict.importedValue,
+        } as SettingsState;
+        return;
+      case 'customItem': {
+        const nextItems = resolvedState.customItems.map(item => (
+          item.id === conflict.itemId ? conflict.importedValue : item
+        ));
+        resolvedState.customItems = nextItems;
+        return;
+      }
+      case 'wordItem': {
+        const nextItems = resolvedState.wordItems.map(item => (
+          item.id === conflict.itemId ? conflict.importedValue : item
+        ));
+        resolvedState.wordItems = nextItems;
+        return;
+      }
+      case 'stats': {
+        const existingCardStats = resolvedState.stats[conflict.cardId] ?? {};
+        resolvedState.stats[conflict.cardId] = {
+          ...existingCardStats,
+          [conflict.direction]: cloneDirectionStats(conflict.importedValue),
+        };
+        return;
+      }
+      default:
+        return;
+    }
+  });
+
+  return resolvedState;
 };
 
 export const loadStoredCardItems = (

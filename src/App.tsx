@@ -1,12 +1,24 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight } from 'lucide-react';
+import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, Download, Upload, AlertTriangle } from 'lucide-react';
 import { toKana } from 'wanakana';
 import RecognizePage from './pages/RecognizePage';
 import RecallPage from './pages/RecallPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import { DAY_IN_MS, DEFAULT_EASE, MIN_EASE, MIN_RECENT_REVIEWS_FOR_STRONG, RECENT_RESULTS_LIMIT } from './appConstants';
-import { buildLocalStorageExport, createEmptyDirectionStats, loadStoredCardItems, loadStoredSettings, loadStoredStats } from './appPersistence';
+import {
+  buildLocalStorageExport,
+  buildStorageImportPlan,
+  createEmptyDirectionStats,
+  parseStorageImport,
+  resolveStorageImportPlan,
+  loadStoredCardItems,
+  loadStoredSettings,
+  loadStoredStats,
+  type ImportConflict,
+  type ImportConflictChoice,
+  type StorageImportPlan,
+} from './appPersistence';
 import { useActivePage, useViewportHeightVar } from './appShell';
 import type {
   CardItem,
@@ -1669,9 +1681,94 @@ const StatsView = ({
   );
 };
 
+const SETTINGS_FIELD_LABELS: Record<keyof SettingsState, string> = {
+  studyMode: 'Study Side',
+  hiragana: 'Hiragana',
+  katakana: 'Katakana',
+  kanji: 'Custom Kanji',
+  jlptN5Kanji: 'JLPT N5 Kanji',
+  showOnyomi: 'Onyomi',
+  showKunyomi: 'Kunyomi',
+  dakuten: 'Dakuten',
+  handakuten: 'Handakuten',
+  yoon: 'Yoon',
+  experimentalDeckBuilderEnabled: 'Experimental Deck Builder',
+  soundEnabled: 'Practice Sounds',
+  hapticsEnabled: 'Haptic Feedback',
+};
+
+const PRACTICE_DIRECTION_LABELS: Record<Direction, string> = {
+  k2r: 'Recognize',
+  r2k: 'Recall',
+};
+
+const formatSettingsValue = (field: keyof SettingsState, value: SettingsState[keyof SettingsState]): string => {
+  if (field === 'studyMode') {
+    return value === 'words' ? 'Words' : 'Characters';
+  }
+
+  return value ? 'On' : 'Off';
+};
+
+const formatCardItemSummary = (item: CardItem): { title: string; subtitle: string; meta: string } => {
+  const subtitleParts = [item.romaji];
+
+  if (item.meanings?.length) {
+    subtitleParts.push(item.meanings.join(', '));
+  }
+
+  return {
+    title: item.char,
+    subtitle: subtitleParts.join(' • '),
+    meta: item.id,
+  };
+};
+
+const getRecentAccuracySummary = (directionStats: DirectionStats): string => {
+  const gotItCount = directionStats.recentResults.reduce<number>((total, value) => total + value, 0);
+  return directionStats.recentResults.length > 0
+    ? `${gotItCount}/${directionStats.recentResults.length} ✅`
+    : '';
+};
+
+const formatConflictDescription = (conflict: ImportConflict): string => {
+  if (conflict.kind === 'settings') {
+    return 'This setting is different in the imported file.';
+  }
+
+  if (conflict.kind === 'stats') {
+    return 'Both this device and the imported file have saved progress for the same card and direction.';
+  }
+
+  return 'Both this device and the imported file have a saved item with the same id but different details.';
+};
+
+const getExportFileName = (): string => {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `nihongo-flash-export-${timestamp}.json`;
+};
+
+const downloadTextFile = (fileName: string, contents: string): void => {
+  const blob = new Blob([contents], { type: 'application/json' });
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = objectUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(objectUrl);
+  }, 0);
+};
+
 const SettingsView = ({
   settings,
   setSettings,
+  stats,
+  setStats,
   customItems,
   setCustomItems,
   wordItems,
@@ -1683,6 +1780,8 @@ const SettingsView = ({
 }: {
   settings: SettingsState;
   setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
+  stats: StatsMap;
+  setStats: React.Dispatch<React.SetStateAction<StatsMap>>;
   customItems: CardItem[];
   setCustomItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
   wordItems: CardItem[];
@@ -1694,9 +1793,13 @@ const SettingsView = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isEditingWords, setIsEditingWords] = useState(false);
-  const [storageExport, setStorageExport] = useState('');
-  const [exportMessage, setExportMessage] = useState('');
-  const [showStorageExport, setShowStorageExport] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [storageMessage, setStorageMessage] = useState('');
+  const [pendingImportFileName, setPendingImportFileName] = useState('');
+  const [pendingImportPlan, setPendingImportPlan] = useState<StorageImportPlan | null>(null);
+  const [importConflictChoices, setImportConflictChoices] = useState<Record<string, ImportConflictChoice>>({});
+  const [showImportConfirmModal, setShowImportConfirmModal] = useState(false);
+  const [showImportConflictModal, setShowImportConflictModal] = useState(false);
   const [newItemChar, setNewItemChar] = useState('');
   const [newItemRomaji, setNewItemRomaji] = useState('');
   const [newWordChar, setNewWordChar] = useState('');
@@ -1757,48 +1860,291 @@ const SettingsView = ({
     setWordItems(prev => prev.filter(item => item.id !== id));
   };
 
-  const handleExportStorage = async (): Promise<void> => {
-    const payload = buildLocalStorageExport();
-    setStorageExport(payload);
-    setShowStorageExport(false);
+  const resetImportState = useCallback(() => {
+    setPendingImportPlan(null);
+    setPendingImportFileName('');
+    setImportConflictChoices({});
+    setShowImportConfirmModal(false);
+    setShowImportConflictModal(false);
+  }, []);
 
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(payload);
-        setExportMessage('Copied local data to clipboard.');
-        return;
-      } catch {
-        // Fall through to manual copy state below.
-      }
+  const applyResolvedImport = useCallback((plan: StorageImportPlan, conflictChoices: Record<string, ImportConflictChoice>) => {
+    const resolvedState = resolveStorageImportPlan(plan, conflictChoices);
+
+    setSettings(resolvedState.settings);
+    setStats(resolvedState.stats);
+    setCustomItems(resolvedState.customItems);
+    setWordItems(resolvedState.wordItems);
+
+    const importedConflictCount = plan.conflicts.filter(conflict => conflictChoices[conflict.id] === 'imported').length;
+    const mergedCount = plan.changes.customItems + plan.changes.wordItems + plan.changes.stats + importedConflictCount;
+    setStorageMessage(
+      mergedCount > 0
+        ? `Merged ${pendingImportFileName} into this device.`
+        : `Import finished. Kept this device's current conflicting values.`,
+    );
+    resetImportState();
+  }, [pendingImportFileName, resetImportState, setCustomItems, setSettings, setStats, setWordItems]);
+
+  const handleExportStorage = (): void => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
     }
 
-    setShowStorageExport(true);
-    setExportMessage('Clipboard access was unavailable. Use the text box below to copy manually.');
+    const payload = buildLocalStorageExport();
+    const fileName = getExportFileName();
+    downloadTextFile(fileName, payload);
+    setStorageMessage(`Downloaded ${fileName}.`);
   };
 
+  const handleImportFileSelected = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const [file] = Array.from(event.target.files ?? []);
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const importedState = parseStorageImport(await file.text());
+    if (!importedState) {
+      setStorageMessage('That file is not a valid nihongo-flash export.');
+      return;
+    }
+
+    const plan = buildStorageImportPlan({
+      settings,
+      stats,
+      customItems,
+      wordItems,
+    }, importedState);
+
+    if (
+      plan.changes.settings === 0
+      && plan.changes.customItems === 0
+      && plan.changes.wordItems === 0
+      && plan.changes.stats === 0
+      && plan.conflicts.length === 0
+    ) {
+      setStorageMessage(`${file.name} already matches this device.`);
+      return;
+    }
+
+    setPendingImportPlan(plan);
+    setPendingImportFileName(file.name);
+    setImportConflictChoices(
+      Object.fromEntries(plan.conflicts.map(conflict => [conflict.id, 'local' as const])),
+    );
+    setShowImportConfirmModal(true);
+    setShowImportConflictModal(false);
+  };
+
+  const handleConfirmImportMerge = (): void => {
+    if (!pendingImportPlan) {
+      return;
+    }
+
+    setShowImportConfirmModal(false);
+
+    if (pendingImportPlan.conflicts.length > 0) {
+      setShowImportConflictModal(true);
+      return;
+    }
+
+    applyResolvedImport(pendingImportPlan, {});
+  };
+
+  const handleResolveConflicts = (): void => {
+    if (!pendingImportPlan) {
+      return;
+    }
+
+    applyResolvedImport(pendingImportPlan, importConflictChoices);
+  };
+
+  const updateConflictChoice = (conflictId: string, choice: ImportConflictChoice): void => {
+    setImportConflictChoices(prev => ({
+      ...prev,
+      [conflictId]: choice,
+    }));
+  };
+
+  const setAllConflictChoices = useCallback((choice: ImportConflictChoice): void => {
+    if (!pendingImportPlan) {
+      return;
+    }
+
+    setImportConflictChoices(
+      Object.fromEntries(
+        pendingImportPlan.conflicts.map(conflict => [conflict.id, choice]),
+      ),
+    );
+  }, [pendingImportPlan]);
+
   useEffect(() => {
-    if (!exportMessage) {
+    if (!storageMessage) {
       return undefined;
     }
 
     const timeoutId = window.setTimeout(() => {
-      setExportMessage('');
+      setStorageMessage('');
     }, 2500);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [exportMessage]);
+  }, [storageMessage]);
 
-  return (
-    <div className="flex-1 overflow-y-auto pb-24 p-6">
-      {exportMessage && (
-        <div className="sticky top-4 z-20 mb-4 flex justify-center pointer-events-none">
-          <div className="rounded-full border border-emerald-400/25 bg-zinc-950/95 px-4 py-2 text-sm font-medium text-emerald-300 shadow-lg backdrop-blur">
-            {exportMessage}
+  const selectedImportedConflictCount = pendingImportPlan
+    ? pendingImportPlan.conflicts.filter(conflict => importConflictChoices[conflict.id] === 'imported').length
+    : 0;
+  const selectedLocalConflictCount = pendingImportPlan
+    ? pendingImportPlan.conflicts.length - selectedImportedConflictCount
+    : 0;
+  const totalConflictCount = pendingImportPlan?.conflicts.length ?? 0;
+  const isAllLocalSelected = totalConflictCount > 0 && selectedLocalConflictCount === totalConflictCount;
+  const isAllImportedSelected = totalConflictCount > 0 && selectedImportedConflictCount === totalConflictCount;
+
+  const conflictItemsById = useMemo(() => {
+    const items = [
+      ...BASE_HIRAGANA,
+      ...HIRAGANA_DAKUTEN,
+      ...HIRAGANA_HANDAKUTEN,
+      ...HIRAGANA_YOON,
+      ...BASE_KATAKANA,
+      ...KATAKANA_DAKUTEN,
+      ...KATAKANA_HANDAKUTEN,
+      ...KATAKANA_YOON,
+      ...JLPT_N5_KANJI,
+      ...DEFAULT_WORDS,
+      ...customItems,
+      ...wordItems,
+      ...(pendingImportPlan?.importedState.customItems ?? []),
+      ...(pendingImportPlan?.importedState.wordItems ?? []),
+    ];
+
+    return items.reduce<Map<string, CardItem>>((acc, item) => {
+      if (!acc.has(item.id)) {
+        acc.set(item.id, item);
+      }
+
+      return acc;
+    }, new Map<string, CardItem>());
+  }, [customItems, pendingImportPlan, wordItems]);
+
+  const getConflictDisplayItem = useCallback((conflict: ImportConflict): CardItem | null => {
+    if (conflict.kind === 'stats') {
+      return conflictItemsById.get(conflict.cardId) ?? null;
+    }
+
+    if (conflict.kind === 'customItem' || conflict.kind === 'wordItem') {
+      return conflict.localValue;
+    }
+
+    return null;
+  }, [conflictItemsById]);
+
+  const renderConflictHeading = useCallback((conflict: ImportConflict): ReactNode => {
+    if (conflict.kind === 'settings') {
+      return (
+        <div>
+          <p className="text-base font-semibold text-zinc-100">{SETTINGS_FIELD_LABELS[conflict.field]}</p>
+          <p className="mt-1 text-sm text-zinc-500">{formatConflictDescription(conflict)}</p>
+        </div>
+      );
+    }
+
+    const displayItem = getConflictDisplayItem(conflict);
+    const itemSummary = displayItem ? formatCardItemSummary(displayItem) : null;
+    const eyebrow = conflict.kind === 'stats'
+      ? PRACTICE_DIRECTION_LABELS[conflict.direction]
+      : conflict.kind === 'wordItem'
+        ? 'Word Entry'
+        : 'Custom Item';
+
+    return (
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">{eyebrow}</p>
+        <div className="mt-2 flex items-start gap-3">
+          <div className="min-w-12 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center text-2xl font-bold text-zinc-100">
+            {itemSummary?.title ?? (conflict.kind === 'stats' ? '?' : conflict.localValue.char)}
+          </div>
+          <div className="min-w-0">
+            <p className="text-base font-semibold text-zinc-100">
+              {itemSummary?.subtitle || (conflict.kind === 'stats' ? conflict.cardId : conflict.localValue.romaji)}
+            </p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {formatConflictDescription(conflict)}
+            </p>
           </div>
         </div>
-      )}
+      </div>
+    );
+  }, [getConflictDisplayItem]);
+
+  const renderConflictChoiceContent = useCallback((conflict: ImportConflict, source: 'local' | 'imported'): ReactNode => {
+    if (conflict.kind === 'settings') {
+      return (
+        <div className="mt-2 inline-flex rounded-full border border-zinc-700 bg-zinc-950/70 px-3 py-1 text-sm font-medium text-zinc-200">
+          {formatSettingsValue(conflict.field, source === 'local' ? conflict.localValue : conflict.importedValue)}
+        </div>
+      );
+    }
+
+    if (conflict.kind === 'stats') {
+      const directionStats = source === 'local' ? conflict.localValue : conflict.importedValue;
+      const statTiles = [
+        { label: 'Reviews', value: String(directionStats.reviews) },
+        { label: 'Streak', value: String(directionStats.streak) },
+        { label: 'Recent', value: getRecentAccuracySummary(directionStats) },
+      ];
+
+      return (
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {statTiles.map(tile => (
+            <div key={tile.label} className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center">
+              <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">{tile.label}</span>
+              <span className="mt-1 block text-sm font-medium text-zinc-200">{tile.value}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    const item = source === 'local' ? conflict.localValue : conflict.importedValue;
+    const summary = formatCardItemSummary(item);
+
+    return (
+      <div className="mt-3 space-y-2">
+        <div className="flex items-start gap-3">
+          <div className="min-w-12 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center text-2xl font-bold text-zinc-100">
+            {summary.title}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-zinc-200">{summary.subtitle}</p>
+            <p className="mt-1 text-xs text-zinc-600">{summary.meta}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }, []);
+
+  return (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(event) => { void handleImportFileSelected(event); }}
+      />
+      <div className="flex-1 overflow-y-auto pb-24 p-6">
+        {storageMessage && (
+          <div className="sticky top-4 z-20 mb-4 flex justify-center pointer-events-none">
+            <div className="rounded-full border border-emerald-400/25 bg-zinc-950/95 px-4 py-2 text-sm font-medium text-emerald-300 shadow-lg backdrop-blur">
+              {storageMessage}
+            </div>
+          </div>
+        )}
       <h2 className="text-3xl font-bold text-zinc-100 mb-8">Settings</h2>
 
       <div className="mb-8">
@@ -1956,25 +2302,206 @@ const SettingsView = ({
 
       <div className="mt-8">
         <div className="mb-4 ml-2">
-          <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Debug Export</h3>
-          <p className="mt-2 text-sm text-zinc-500">Export this device's saved app data to help diagnose issues.</p>
+          <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Saved Data</h3>
+          <p className="mt-2 text-sm text-zinc-500">Download a backup file or import one and merge it into this device.</p>
         </div>
-        <button
-          onClick={() => { void handleExportStorage(); }}
-          className="w-full rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
-        >
-          <span className="block text-zinc-100 font-medium">Copy Saved Data</span>
-          <span className="mt-1 block text-sm text-zinc-500">Please send this data to the developers for assistance.</span>
-        </button>
-        {showStorageExport && storageExport && (
-          <textarea
-            readOnly
-            value={storageExport}
-            className="mt-4 min-h-[12rem] w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-300 outline-none"
-          />
-        )}
+        <div className="space-y-3">
+          <button
+            onClick={handleExportStorage}
+            className="flex w-full items-start gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+          >
+            <Download className="mt-0.5 text-emerald-400" size={20} />
+            <span>
+              <span className="block text-zinc-100 font-medium">Export Saved Data</span>
+              <span className="mt-1 block text-sm text-zinc-500">Download a JSON backup of this device&apos;s current progress and settings data.</span>
+            </span>
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex w-full items-start gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+          >
+            <Upload className="mt-0.5 text-emerald-400" size={20} />
+            <span>
+              <span className="block text-zinc-100 font-medium">Import Saved Data</span>
+              <span className="mt-1 block text-sm text-zinc-500">Upload an exported backup and merge its progress and settings with current data.</span>
+            </span>
+          </button>
+        </div>
       </div>
-    </div>
+      </div>
+
+      {showImportConfirmModal && pendingImportPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <button type="button" aria-label="Close import confirmation" className="absolute inset-0 cursor-default" onClick={resetImportState} />
+          <div className="relative z-10 max-h-[calc(var(--app-height,100vh)-8rem)] w-full max-w-2xl overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 p-6 mb-[calc(env(safe-area-inset-bottom,0px)+3rem)] shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">Import Backup</p>
+                <h3 className="mt-2 text-2xl font-bold text-zinc-100">Merge saved data now?</h3>
+                <p className="mt-2 text-sm text-zinc-400">
+                  <span className="font-medium text-zinc-200">{pendingImportFileName}</span> will be merged into the saved data on this device.
+                </p>
+              </div>
+              <button type="button" onClick={resetImportState} className="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+              Non-conflicting data will merge automatically. If the same setting, item, or progress entry exists in both places, you&apos;ll review it before anything conflicting is changed.
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Custom Items</p>
+                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.customItems}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Word Items</p>
+                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.wordItems}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Progress Entries</p>
+                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.stats}</p>
+              </div>
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">Conflicts To Review</p>
+                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.conflicts.length}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button type="button" onClick={resetImportState} className="flex-1 rounded-2xl border border-zinc-800 px-4 py-3 font-medium text-zinc-300 transition-colors hover:bg-zinc-900">
+                Cancel
+              </button>
+              <button type="button" onClick={handleConfirmImportMerge} className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 font-semibold text-white transition-colors hover:bg-emerald-600">
+                {pendingImportPlan.conflicts.length > 0 ? 'Review Conflicts' : 'Merge Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportConflictModal && pendingImportPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <button type="button" aria-label="Close import conflicts" className="absolute inset-0 cursor-default" onClick={resetImportState} />
+          <div className="relative z-10 max-h-[calc(var(--app-height,100vh)-8rem)] w-full max-w-2xl overflow-y-auto rounded-[2rem] border border-zinc-800 bg-zinc-950 p-6 mb-[calc(env(safe-area-inset-bottom,0px)+3rem)] shadow-2xl">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">Conflict Review</p>
+                  <h3 className="mt-2 text-2xl font-bold text-zinc-100">Choose what to keep</h3>
+                  <p className="mt-2 text-sm text-zinc-400">Each conflict below needs a winner before the merge can finish.</p>
+                </div>
+                <button type="button" onClick={resetImportState} className="rounded-full p-2 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200">
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 p-4 text-rose-100">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Conflicts detected in the imported backup.</p>
+                    <p className="mt-1 text-sm text-rose-100/80">Pick either the current device value or the imported file value for each conflict.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4 shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
+                <div className="flex flex-col gap-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => setAllConflictChoices('local')}
+                      className={`rounded-2xl border px-5 py-4 text-left transition-all ${
+                        isAllLocalSelected
+                          ? 'border-emerald-400/45 bg-emerald-500/10 hover:bg-emerald-500/14 hover:shadow-[0_12px_28px_rgba(16,185,129,0.1)]'
+                          : 'border-zinc-700/90 bg-zinc-950/60 hover:border-zinc-500 hover:bg-zinc-900/90 hover:shadow-[0_12px_28px_rgba(0,0,0,0.18)]'
+                      }`}
+                      style={{
+                        display: 'flex',
+                        flexFlow: 'column',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span className="block text-md text-center font-semibold text-zinc-100">Keep Current For All</span>
+                      <span className="mt-4 inline-flex rounded-full border border-zinc-700 bg-zinc-950/80 px-4 py-2 text-xs font-semibold text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                        Current Selected: {selectedLocalConflictCount}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAllConflictChoices('imported')}
+                      className={`rounded-2xl border px-5 py-4 text-left transition-all ${
+                        isAllImportedSelected
+                          ? 'border-emerald-400/45 bg-emerald-500/10 hover:bg-emerald-500/14 hover:shadow-[0_12px_28px_rgba(16,185,129,0.1)]'
+                          : 'border-zinc-700/90 bg-zinc-950/60 hover:border-zinc-500 hover:bg-zinc-900/90 hover:shadow-[0_12px_28px_rgba(0,0,0,0.18)]'
+                      }`}
+                      style={{
+                        display: 'flex',
+                        flexFlow: 'column',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span className="block text-md text-center font-semibold text-zinc-100">Use Imported For All</span>
+                      <span className="mt-4 inline-flex rounded-full border border-zinc-700 bg-zinc-950/80 px-4 py-2 text-xs font-semibold text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                        Current Selected: {selectedImportedConflictCount}
+                      </span>
+                    </button>
+                  </div>
+                  <div>
+                    <p className="mt-1 text-sm text-zinc-400 text-center">
+                      Apply one side to every conflict, then fine-tune any exceptions below.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {pendingImportPlan.conflicts.map(conflict => {
+                  const selectedChoice = importConflictChoices[conflict.id] ?? 'local';
+
+                  return (
+                    <div key={conflict.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                      <div className="mb-4">{renderConflictHeading(conflict)}</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => updateConflictChoice(conflict.id, 'local')}
+                          className={`rounded-2xl border px-4 py-3 text-left transition-colors ${selectedChoice === 'local' ? 'border-emerald-400 bg-emerald-500/10' : 'border-zinc-800 bg-zinc-950/60 hover:bg-zinc-950'}`}
+                        >
+                          <span className="block text-sm font-semibold text-zinc-100">Current Device</span>
+                          {renderConflictChoiceContent(conflict, 'local')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateConflictChoice(conflict.id, 'imported')}
+                          className={`rounded-2xl border px-4 py-3 text-left transition-colors ${selectedChoice === 'imported' ? 'border-emerald-400 bg-emerald-500/10' : 'border-zinc-800 bg-zinc-950/60 hover:bg-zinc-950'}`}
+                        >
+                          <span className="block text-sm font-semibold text-zinc-100">Imported File</span>
+                          {renderConflictChoiceContent(conflict, 'imported')}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <p className="text-sm text-zinc-500">{selectedImportedConflictCount} imported values selected</p>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => { setShowImportConflictModal(false); setShowImportConfirmModal(true); }} className="rounded-2xl border border-zinc-800 px-4 py-3 font-medium text-zinc-300 transition-colors hover:bg-zinc-900">
+                  Back
+                </button>
+                <button type="button" onClick={handleResolveConflicts} className="rounded-2xl bg-emerald-500 px-4 py-3 font-semibold text-white transition-colors hover:bg-emerald-600 whitespace-nowrap">
+                  Merge Data
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
@@ -2207,6 +2734,8 @@ export default function App() {
             SettingsViewComponent={SettingsView}
             settings={settings}
             setSettings={setSettings}
+            stats={stats}
+            setStats={setStats}
             customItems={customItems}
             setCustomItems={setCustomItems}
             wordItems={wordItems}
