@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, AlertTriangle, SquareArrowUpRight, SquareArrowDownRight } from 'lucide-react';
+import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, AlertTriangle, Download, Upload } from 'lucide-react';
 import { toKana } from 'wanakana';
 import RecognizePage from './pages/RecognizePage';
 import RecallPage from './pages/RecallPage';
@@ -1680,33 +1680,9 @@ const StatsView = ({
   );
 };
 
-const SETTINGS_FIELD_LABELS: Record<keyof SettingsState, string> = {
-  studyMode: 'Study Side',
-  hiragana: 'Hiragana',
-  katakana: 'Katakana',
-  kanji: 'Custom Kanji',
-  jlptN5Kanji: 'JLPT N5 Kanji',
-  showOnyomi: 'Onyomi',
-  showKunyomi: 'Kunyomi',
-  dakuten: 'Dakuten',
-  handakuten: 'Handakuten',
-  yoon: 'Yoon',
-  experimentalDeckBuilderEnabled: 'Experimental Deck Builder',
-  soundEnabled: 'Practice Sounds',
-  hapticsEnabled: 'Haptic Feedback',
-};
-
 const PRACTICE_DIRECTION_LABELS: Record<Direction, string> = {
   k2r: 'Recognize',
   r2k: 'Recall',
-};
-
-const formatSettingsValue = (field: keyof SettingsState, value: SettingsState[keyof SettingsState]): string => {
-  if (field === 'studyMode') {
-    return value === 'words' ? 'Words' : 'Characters';
-  }
-
-  return value ? 'On' : 'Off';
 };
 
 const formatCardItemSummary = (item: CardItem): { title: string; subtitle: string; meta: string } => {
@@ -1731,15 +1707,7 @@ const getRecentAccuracySummary = (directionStats: DirectionStats): string => {
 };
 
 const formatConflictDescription = (conflict: ImportConflict): string => {
-  if (conflict.kind === 'settings') {
-    return 'This setting is different in the imported file.';
-  }
-
-  if (conflict.kind === 'stats') {
-    return 'Both this device and the imported file have saved progress for the same card and direction.';
-  }
-
-  return 'Both this device and the imported file have a saved item with the same id but different details.';
+  return 'Both this device and the imported file have saved progress for the same card and direction.';
 };
 
 const getExportFileName = (): string => {
@@ -1870,20 +1838,17 @@ const SettingsView = ({
   const applyResolvedImport = useCallback((plan: StorageImportPlan, conflictChoices: Record<string, ImportConflictChoice>) => {
     const resolvedState = resolveStorageImportPlan(plan, conflictChoices);
 
-    setSettings(resolvedState.settings);
     setStats(resolvedState.stats);
-    setCustomItems(resolvedState.customItems);
-    setWordItems(resolvedState.wordItems);
 
     const importedConflictCount = plan.conflicts.filter(conflict => conflictChoices[conflict.id] === 'imported').length;
-    const mergedCount = plan.changes.customItems + plan.changes.wordItems + plan.changes.stats + importedConflictCount;
+    const mergedCount = plan.changes.stats + importedConflictCount;
     setStorageMessage(
       mergedCount > 0
-        ? `Merged ${pendingImportFileName} into this device.`
-        : `Import finished. Kept this device's current conflicting values.`,
+        ? `Imported progress from ${pendingImportFileName}.`
+        : `Import finished. Kept this device's current conflicting progress.`,
     );
     resetImportState();
-  }, [pendingImportFileName, resetImportState, setCustomItems, setSettings, setStats, setWordItems]);
+  }, [pendingImportFileName, resetImportState, setStats]);
 
   const handleExportStorage = (): void => {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -1911,20 +1876,14 @@ const SettingsView = ({
     }
 
     const plan = buildStorageImportPlan({
-      settings,
       stats,
-      customItems,
-      wordItems,
     }, importedState);
 
     if (
-      plan.changes.settings === 0
-      && plan.changes.customItems === 0
-      && plan.changes.wordItems === 0
-      && plan.changes.stats === 0
+      plan.changes.stats === 0
       && plan.conflicts.length === 0
     ) {
-      setStorageMessage(`${file.name} already matches this device.`);
+      setStorageMessage(`${file.name} has no new progress for this device.`);
       return;
     }
 
@@ -2017,8 +1976,6 @@ const SettingsView = ({
       ...DEFAULT_WORDS,
       ...customItems,
       ...wordItems,
-      ...(pendingImportPlan?.importedState.customItems ?? []),
-      ...(pendingImportPlan?.importedState.wordItems ?? []),
     ];
 
     return items.reduce<Map<string, CardItem>>((acc, item) => {
@@ -2030,46 +1987,25 @@ const SettingsView = ({
     }, new Map<string, CardItem>());
   }, [customItems, pendingImportPlan, wordItems]);
 
-  const getConflictDisplayItem = useCallback((conflict: ImportConflict): CardItem | null => {
-    if (conflict.kind === 'stats') {
-      return conflictItemsById.get(conflict.cardId) ?? null;
-    }
-
-    if (conflict.kind === 'customItem' || conflict.kind === 'wordItem') {
-      return conflict.localValue;
-    }
-
-    return null;
-  }, [conflictItemsById]);
+  const getConflictDisplayItem = useCallback((conflict: ImportConflict): CardItem | null => (
+    conflictItemsById.get(conflict.cardId) ?? null
+  ), [conflictItemsById]);
 
   const renderConflictHeading = useCallback((conflict: ImportConflict): ReactNode => {
-    if (conflict.kind === 'settings') {
-      return (
-        <div>
-          <p className="text-base font-semibold text-zinc-100">{SETTINGS_FIELD_LABELS[conflict.field]}</p>
-          <p className="mt-1 text-sm text-zinc-500">{formatConflictDescription(conflict)}</p>
-        </div>
-      );
-    }
-
     const displayItem = getConflictDisplayItem(conflict);
     const itemSummary = displayItem ? formatCardItemSummary(displayItem) : null;
-    const eyebrow = conflict.kind === 'stats'
-      ? PRACTICE_DIRECTION_LABELS[conflict.direction]
-      : conflict.kind === 'wordItem'
-        ? 'Word Entry'
-        : 'Custom Item';
+    const eyebrow = PRACTICE_DIRECTION_LABELS[conflict.direction];
 
     return (
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">{eyebrow}</p>
         <div className="mt-2 flex items-start gap-3">
           <div className="min-w-12 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center text-2xl font-bold text-zinc-100">
-            {itemSummary?.title ?? (conflict.kind === 'stats' ? '?' : conflict.localValue.char)}
+            {itemSummary?.title ?? '?'}
           </div>
           <div className="min-w-0">
             <p className="text-base font-semibold text-zinc-100">
-              {itemSummary?.subtitle || (conflict.kind === 'stats' ? conflict.cardId : conflict.localValue.romaji)}
+              {itemSummary?.subtitle || conflict.cardId}
             </p>
             <p className="mt-1 text-sm text-zinc-500">
               {formatConflictDescription(conflict)}
@@ -2081,48 +2017,21 @@ const SettingsView = ({
   }, [getConflictDisplayItem]);
 
   const renderConflictChoiceContent = useCallback((conflict: ImportConflict, source: 'local' | 'imported'): ReactNode => {
-    if (conflict.kind === 'settings') {
-      return (
-        <div className="mt-2 inline-flex rounded-full border border-zinc-700 bg-zinc-950/70 px-3 py-1 text-sm font-medium text-zinc-200">
-          {formatSettingsValue(conflict.field, source === 'local' ? conflict.localValue : conflict.importedValue)}
-        </div>
-      );
-    }
-
-    if (conflict.kind === 'stats') {
-      const directionStats = source === 'local' ? conflict.localValue : conflict.importedValue;
-      const statTiles = [
-        { label: 'Reviews', value: String(directionStats.reviews) },
-        { label: 'Streak', value: String(directionStats.streak) },
-        { label: 'Recent', value: getRecentAccuracySummary(directionStats) },
-      ];
-
-      return (
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          {statTiles.map(tile => (
-            <div key={tile.label} className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center">
-              <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">{tile.label}</span>
-              <span className="mt-1 block text-sm font-medium text-zinc-200">{tile.value}</span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    const item = source === 'local' ? conflict.localValue : conflict.importedValue;
-    const summary = formatCardItemSummary(item);
+    const directionStats = source === 'local' ? conflict.localValue : conflict.importedValue;
+    const statTiles = [
+      { label: 'Reviews', value: String(directionStats.reviews) },
+      { label: 'Streak', value: String(directionStats.streak) },
+      { label: 'Recent', value: getRecentAccuracySummary(directionStats) },
+    ];
 
     return (
-      <div className="mt-3 space-y-2">
-        <div className="flex items-start gap-3">
-          <div className="min-w-12 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center text-2xl font-bold text-zinc-100">
-            {summary.title}
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {statTiles.map(tile => (
+          <div key={tile.label} className="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-center">
+            <span className="block text-[11px] font-bold uppercase tracking-[0.18em] text-zinc-500">{tile.label}</span>
+            <span className="mt-1 block text-sm font-medium text-zinc-200">{tile.value}</span>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-zinc-200">{summary.subtitle}</p>
-            <p className="mt-1 text-xs text-zinc-600">{summary.meta}</p>
-          </div>
-        </div>
+        ))}
       </div>
     );
   }, []);
@@ -2306,23 +2215,23 @@ const SettingsView = ({
         </div>
         <div className="space-y-3">
           <button
-            onClick={handleExportStorage}
-            className="flex w-full items-start md:items-center gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
-          >
-            <SquareArrowUpRight className="mt-0.5 text-emerald-400" size={25} />
-            <span>
-              <span className="block text-zinc-100 font-medium">Export Saved Data</span>
-              <span className="mt-1 block text-sm text-zinc-500">Download a JSON backup of this device&apos;s current progress and settings data.</span>
-            </span>
-          </button>
-          <button
             onClick={() => fileInputRef.current?.click()}
             className="flex w-full items-start md:items-center gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
           >
-            <SquareArrowDownRight className="mt-0.5 text-emerald-400" size={25} />
+            <Download className="mt-0.5 text-emerald-400" size={25} />
             <span>
               <span className="block text-zinc-100 font-medium">Import Saved Data</span>
-              <span className="mt-1 block text-sm text-zinc-500">Upload an exported backup and merge its progress and settings with current data.</span>
+              <span className="mt-1 block text-sm text-zinc-500">Import an exported backup and merge its progress with current data.</span>
+            </span>
+          </button>
+          <button
+            onClick={handleExportStorage}
+            className="flex w-full items-start md:items-center gap-4 rounded-2xl bg-zinc-900 px-4 py-4 text-left transition-colors hover:bg-zinc-800/80"
+          >
+            <Upload className="mt-0.5 text-emerald-400" size={25} />
+            <span>
+              <span className="block text-zinc-100 font-medium">Export Saved Data</span>
+              <span className="mt-1 block text-sm text-zinc-500">Export this device&apos;s current progress and settings data as a JSON file.</span>
             </span>
           </button>
         </div>
@@ -2351,14 +2260,6 @@ const SettingsView = ({
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Custom Items</p>
-                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.customItems}</p>
-              </div>
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Word Items</p>
-                <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.wordItems}</p>
-              </div>
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.22em] text-zinc-500">New Progress Entries</p>
                 <p className="mt-2 text-2xl font-bold text-zinc-100">{pendingImportPlan.changes.stats}</p>
