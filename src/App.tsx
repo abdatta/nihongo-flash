@@ -61,8 +61,7 @@ import {
   getEnabledKatakanaCards,
 } from './studyData';
 import {
-  buildAdaptiveQueueFromRankedEntries,
-  buildExperimentalQueueFromBuckets,
+  buildSessionQueueFromBuckets,
   shuffleCards,
 } from './deckBuilder';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
@@ -625,7 +624,7 @@ const getCardStrengthMeta = (directionStats: DirectionStats | null | undefined):
   };
 };
 
-const buildExperimentalQueue = (
+const buildSessionQueue = (
   activePool: CardItem[],
   stats: StatsMap,
   direction: Direction,
@@ -647,25 +646,7 @@ const buildExperimentalQueue = (
     strong: [],
   });
 
-  return buildExperimentalQueueFromBuckets(buckets, sessionSize);
-};
-
-const buildAdaptiveQueue = (
-  activePool: CardItem[],
-  stats: StatsMap,
-  direction: Direction,
-  sessionSize = 15,
-): CardItem[] => {
-  const now = Date.now();
-  const rankedCards = activePool
-    .map(card => ({ card, ...getCardPriority(card, stats, direction, now) }))
-    .sort((a, b) => b.score - a.score);
-
-  return buildAdaptiveQueueFromRankedEntries(
-    rankedCards,
-    entry => getCardStrengthMeta(entry.directionStats).bucket,
-    sessionSize,
-  );
+  return buildSessionQueueFromBuckets(buckets, sessionSize);
 };
 
 // --- COMPONENTS ---
@@ -1203,7 +1184,6 @@ const PracticeSession = ({
   studyMode,
   direction,
   stats,
-  experimentalDeckBuilderEnabled,
   onUpdateStats,
   onPlaySound,
   onTriggerHaptics,
@@ -1213,14 +1193,10 @@ const PracticeSession = ({
   const [sessionActive, setSessionActive] = useState(() => activePool.length > 0);
 
   const startSession = useCallback(() => {
-    setQueue(
-      experimentalDeckBuilderEnabled
-        ? buildExperimentalQueue(activePool, stats, direction, 15)
-        : buildAdaptiveQueue(activePool, stats, direction, 15),
-    );
+    setQueue(buildSessionQueue(activePool, stats, direction, 15));
     setCurrentIndex(0);
     setSessionActive(true);
-  }, [activePool, stats, direction, experimentalDeckBuilderEnabled]);
+  }, [activePool, stats, direction]);
 
   // Initial auto-start if pool is available
   useEffect(() => {
@@ -2098,11 +2074,6 @@ const SettingsView = ({
 
       <div className="mb-8">
         <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Session Experience</h3>
-        <Toggle
-          label="Experimental Deck Builder"
-          checked={settings.experimentalDeckBuilderEnabled}
-          onChange={(val) => setSettings(s => ({ ...s, experimentalDeckBuilderEnabled: val }))}
-        />
         <Toggle label="Practice Sounds" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
         {hapticsSupported && (
           <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
@@ -2589,7 +2560,6 @@ export default function App() {
     activePool,
     studyMode: settings.studyMode,
     stats,
-    experimentalDeckBuilderEnabled: settings.experimentalDeckBuilderEnabled,
     onUpdateStats: updateStats,
     onPlaySound: playFeedbackSound,
     onTriggerHaptics: triggerHaptics,

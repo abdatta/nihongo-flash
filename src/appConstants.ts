@@ -17,7 +17,6 @@ export const DEFAULT_SETTINGS: SettingsState = {
   dakuten: false,
   handakuten: false,
   yoon: false,
-  experimentalDeckBuilderEnabled: true,
   soundEnabled: true,
   hapticsEnabled: true,
 };

@@ -185,6 +185,8 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
   }
 
   const safeSettings = storedSettings as Partial<SettingsState> & Record<string, unknown>;
+  const hasStoredOnyomiPreference = typeof safeSettings.showOnyomi === 'boolean';
+  const hasStoredKunyomiPreference = typeof safeSettings.showKunyomi === 'boolean';
 
   return {
     ...(safeSettings.studyMode === 'words' || safeSettings.studyMode === 'characters' ? { studyMode: safeSettings.studyMode } : {}),
@@ -192,14 +194,11 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
     ...(typeof safeSettings.katakana === 'boolean' ? { katakana: safeSettings.katakana } : {}),
     ...(typeof safeSettings.kanji === 'boolean' ? { kanji: safeSettings.kanji } : {}),
     ...(typeof safeSettings.jlptN5Kanji === 'boolean' ? { jlptN5Kanji: safeSettings.jlptN5Kanji } : {}),
-    ...(typeof safeSettings.showOnyomi === 'boolean' ? { showOnyomi: safeSettings.showOnyomi } : {}),
-    ...(typeof safeSettings.showKunyomi === 'boolean' ? { showKunyomi: safeSettings.showKunyomi } : {}),
+    ...(hasStoredOnyomiPreference ? { showOnyomi: safeSettings.showOnyomi } : { showOnyomi: true }),
+    ...(hasStoredKunyomiPreference ? { showKunyomi: safeSettings.showKunyomi } : { showKunyomi: true }),
     ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
     ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
     ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),
-    ...(typeof safeSettings.experimentalDeckBuilderEnabled === 'boolean'
-      ? { experimentalDeckBuilderEnabled: safeSettings.experimentalDeckBuilderEnabled }
-      : {}),
     ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
     ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
   };

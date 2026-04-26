@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  buildAdaptiveQueueFromRankedEntries,
-  buildExperimentalQueueFromBuckets,
+  buildSessionQueueFromBuckets,
   pickExperimentalNewCards,
-  type RankedQueueEntry,
 } from './deckBuilder';
 import type { CardItem } from './types';
 
@@ -95,7 +93,7 @@ describe('pickExperimentalNewCards', () => {
   });
 });
 
-describe('buildExperimentalQueueFromBuckets', () => {
+describe('buildSessionQueueFromBuckets', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -103,7 +101,7 @@ describe('buildExperimentalQueueFromBuckets', () => {
   it('uses frequency-aware picking only for new cards and keeps the session size bounded', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
 
-    const queue = buildExperimentalQueueFromBuckets({
+    const queue = buildSessionQueueFromBuckets({
       strong: [makeCard('strong-1'), makeCard('strong-2')],
       weak: [makeCard('weak-1')],
       improving: [makeCard('improving-1')],
@@ -113,52 +111,5 @@ describe('buildExperimentalQueueFromBuckets', () => {
     expect(queue).toHaveLength(5);
     expect(queue.some(card => card.id === 'new-high')).toBe(true);
     expect(queue.some(card => card.id === 'new-low')).toBe(false);
-  });
-});
-
-describe('buildAdaptiveQueueFromRankedEntries', () => {
-  it('does not reorder new cards by frequency in the non-experimental adaptive path', () => {
-    const rankedEntries: RankedQueueEntry<CardItem>[] = [
-      { card: makeCard('due-weak'), isDue: true, isNew: false, directionStats: { bucket: 'weak' } },
-      { card: makeCard('new-low', 1), isDue: true, isNew: true, directionStats: { bucket: 'new' } },
-      { card: makeCard('new-high', 100), isDue: true, isNew: true, directionStats: { bucket: 'new' } },
-      { card: makeCard('future-strong'), isDue: false, isNew: false, directionStats: { bucket: 'strong' } },
-    ];
-
-    const queue = buildAdaptiveQueueFromRankedEntries(
-      rankedEntries,
-      entry => (entry.directionStats as unknown as { bucket: 'new' | 'weak' | 'improving' | 'strong' }).bucket,
-      4,
-    );
-
-    expect(queue.map(card => card.id)).toEqual(['due-weak', 'new-low', 'new-high', 'future-strong']);
-  });
-
-  it('caps new cards when the learner already has enough due weak items', () => {
-    const dueWeakEntries: RankedQueueEntry<CardItem>[] = Array.from({ length: 6 }, (_, index) => ({
-      card: makeCard(`weak-${index}`),
-      isDue: true,
-      isNew: false,
-      directionStats: { bucket: 'weak' as const },
-    }));
-    const fillerEntries: RankedQueueEntry<CardItem>[] = Array.from({ length: 2 }, (_, index) => ({
-      card: makeCard(`future-strong-${index}`),
-      isDue: false,
-      isNew: false,
-      directionStats: { bucket: 'strong' as const },
-    }));
-    const newEntries: RankedQueueEntry<CardItem>[] = [
-      { card: makeCard('new-a', 100), isDue: true, isNew: true, directionStats: { bucket: 'new' as const } },
-      { card: makeCard('new-b', 90), isDue: true, isNew: true, directionStats: { bucket: 'new' as const } },
-    ];
-
-    const queue = buildAdaptiveQueueFromRankedEntries(
-      [...dueWeakEntries, ...newEntries, ...fillerEntries],
-      entry => (entry.directionStats as unknown as { bucket: 'new' | 'weak' | 'improving' | 'strong' }).bucket,
-      8,
-    );
-
-    expect(queue.map(card => card.id)).not.toContain('new-a');
-    expect(queue.map(card => card.id)).not.toContain('new-b');
   });
 });

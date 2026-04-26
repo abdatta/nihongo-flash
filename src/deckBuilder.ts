@@ -1,12 +1,5 @@
 import type { CardItem } from './types';
 
-export interface RankedQueueEntry<TCard = CardItem, TDirectionStats = unknown> {
-  card: TCard;
-  isDue: boolean;
-  isNew: boolean;
-  directionStats: TDirectionStats;
-}
-
 export const shuffleCards = <TCard>(cards: TCard[]): TCard[] => {
   const shuffled = [...cards];
 
@@ -67,7 +60,7 @@ export const pickExperimentalNewCards = (cards: CardItem[], count: number): Card
   return selected;
 };
 
-export const buildExperimentalQueueFromBuckets = (
+export const buildSessionQueueFromBuckets = (
   buckets: Record<'new' | 'weak' | 'improving' | 'strong', CardItem[]>,
   sessionSize = 15,
 ): CardItem[] => {
@@ -94,78 +87,4 @@ export const buildExperimentalQueueFromBuckets = (
   ];
 
   return shuffleCards(selected);
-};
-
-export const buildAdaptiveQueueFromRankedEntries = <TCard>(
-  rankedCards: RankedQueueEntry<TCard, any>[],
-  getBucket: (entry: RankedQueueEntry<TCard, any>) => 'new' | 'weak' | 'improving' | 'strong',
-  sessionSize = 15,
-): TCard[] => {
-  const reviewedEntries = rankedCards.filter(entry => !entry.isNew);
-  const dueReviewedEntries = reviewedEntries.filter(entry => entry.isDue);
-  const dueReviewedCount = dueReviewedEntries.length;
-  const weakDueEntries = dueReviewedEntries.filter(entry => getBucket(entry) === 'weak');
-  const dueNonStrongEntries = dueReviewedEntries.filter(entry => getBucket(entry) !== 'strong');
-  const introducedCardCount = reviewedEntries.length;
-
-  let targetNewCards = introducedCardCount < sessionSize ? 3 : 2;
-
-  if (dueReviewedCount === 0) {
-    targetNewCards = Math.min(2, introducedCardCount < sessionSize ? 3 : 2);
-  } else if (weakDueEntries.length >= 6 || dueNonStrongEntries.length >= 8) {
-    targetNewCards = 0;
-  } else if (weakDueEntries.length >= 3 || dueNonStrongEntries.length >= 4) {
-    targetNewCards = 1;
-  } else if (weakDueEntries.length <= 1 && dueNonStrongEntries.length <= 1 && introducedCardCount < sessionSize) {
-    targetNewCards = 3;
-  } else {
-    targetNewCards = 2;
-  }
-
-  const maxNewCards = introducedCardCount < sessionSize ? 3 : 2;
-  const dueLearningEntries = dueReviewedEntries.filter(entry => getBucket(entry) !== 'strong');
-  const dueStrongEntries = dueReviewedEntries.filter(entry => getBucket(entry) === 'strong');
-  const futureLearningEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getBucket(entry) !== 'strong');
-  const futureStrongEntries = rankedCards.filter(entry => !entry.isDue && !entry.isNew && getBucket(entry) === 'strong');
-  const newEntries = rankedCards.filter(entry => entry.isNew);
-  const prioritizedEntries = [
-    ...dueLearningEntries,
-    ...dueStrongEntries,
-    ...newEntries,
-    ...futureLearningEntries,
-    ...futureStrongEntries,
-  ];
-  const selected: TCard[] = [];
-  const selectedIds = new Set<TCard>();
-  let newCardsSelected = 0;
-
-  for (const entry of prioritizedEntries) {
-    if (selected.length >= sessionSize) break;
-    if (selectedIds.has(entry.card)) continue;
-    if (entry.isNew && newCardsSelected >= targetNewCards) continue;
-
-    selected.push(entry.card);
-    selectedIds.add(entry.card);
-
-    if (entry.isNew) {
-      newCardsSelected += 1;
-    }
-  }
-
-  if (selected.length < sessionSize) {
-    for (const entry of prioritizedEntries) {
-      if (selected.length >= sessionSize) break;
-      if (selectedIds.has(entry.card)) continue;
-      if (entry.isNew && newCardsSelected >= maxNewCards) continue;
-
-      selected.push(entry.card);
-      selectedIds.add(entry.card);
-
-      if (entry.isNew) {
-        newCardsSelected += 1;
-      }
-    }
-  }
-
-  return selected;
 };
