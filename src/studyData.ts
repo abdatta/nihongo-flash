@@ -13,6 +13,8 @@ interface StudyDataShape {
   katakanaYoon: CardItem[];
   jlptN5Kanji: CardItem[];
   defaultWords: CardItem[];
+  tobiraWords: CardItem[];
+  tobiraKanji: CardItem[];
 }
 
 // Study items are the source of truth for kanji reading metadata.
@@ -73,23 +75,27 @@ export const KATAKANA: CardItem[] = [
 
 export const JLPT_N5_KANJI: CardItem[] = applyFrequencies(typedStudyData.jlptN5Kanji);
 export const DEFAULT_WORDS: CardItem[] = applyFrequencies(typedStudyData.defaultWords);
+export const TOBIRA_WORDS: CardItem[] = typedStudyData.tobiraWords ?? [];
+export const TOBIRA_KANJI: CardItem[] = typedStudyData.tobiraKanji ?? [];
 
 export const getEnabledHiraganaCards = (settings: SettingsState): CardItem[] => {
-  const cards = [...BASE_HIRAGANA];
+  const options = settings.hiraganaOptions;
+  const cards = options.basic ? [...BASE_HIRAGANA] : [];
 
-  if (settings.dakuten) cards.push(...HIRAGANA_DAKUTEN);
-  if (settings.handakuten) cards.push(...HIRAGANA_HANDAKUTEN);
-  if (settings.yoon) cards.push(...HIRAGANA_YOON);
+  if (options.dakuten) cards.push(...HIRAGANA_DAKUTEN);
+  if (options.handakuten) cards.push(...HIRAGANA_HANDAKUTEN);
+  if (options.yoon) cards.push(...HIRAGANA_YOON);
 
   return cards;
 };
 
 export const getEnabledKatakanaCards = (settings: SettingsState): CardItem[] => {
-  const cards = [...BASE_KATAKANA];
+  const options = settings.katakanaOptions;
+  const cards = options.basic ? [...BASE_KATAKANA] : [];
 
-  if (settings.dakuten) cards.push(...KATAKANA_DAKUTEN);
-  if (settings.handakuten) cards.push(...KATAKANA_HANDAKUTEN);
-  if (settings.yoon) cards.push(...KATAKANA_YOON);
+  if (options.dakuten) cards.push(...KATAKANA_DAKUTEN);
+  if (options.handakuten) cards.push(...KATAKANA_HANDAKUTEN);
+  if (options.yoon) cards.push(...KATAKANA_YOON);
 
   return cards;
 };

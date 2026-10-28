@@ -8,6 +8,26 @@ export type FeedbackEffect = 'reveal' | ReviewResult;
 export type StrengthBucket = 'new' | 'weak' | 'strong' | 'improving';
 export type KanjiReadingType = 'onyomi' | 'kunyomi';
 
+export interface KanaOptions {
+  basic: boolean;
+  dakuten: boolean;
+  handakuten: boolean;
+  yoon: boolean;
+}
+
+export interface CollectionMembership {
+  collectionId: string;
+  lesson: number;
+  group?: string;
+}
+
+export interface StudySetDefinition {
+  id: number;
+  label: string;
+  description?: string;
+  referencePages?: string;
+}
+
 export interface CardItem {
   id: string;
   char: string;
@@ -16,6 +36,11 @@ export interface CardItem {
   studyMode?: StudyMode;
   meanings?: string[];
   frequency?: number;
+  kana?: string;
+  acceptedAnswers?: string[];
+  memberships?: CollectionMembership[];
+  // Textbook order is independent of corpus frequency and persisted progress.
+  order?: number;
   // Kanji cards can mark which part of the displayed romaji belongs to the kanji itself.
   // The range is [start, end), so it can represent readings at the start, middle, or end.
   readingType?: KanjiReadingType;
@@ -45,9 +70,20 @@ export interface SettingsState {
   jlptN5Kanji: boolean;
   showOnyomi: boolean;
   showKunyomi: boolean;
+  // Legacy shared flags are retained for migrating older saved settings.
   dakuten: boolean;
   handakuten: boolean;
   yoon: boolean;
+  hiraganaOptions: KanaOptions;
+  katakanaOptions: KanaOptions;
+  tobiraKanji: boolean;
+  characterLessons: number[];
+  mixCharacterLessons: boolean;
+  wordSource: 'tobira' | 'personal';
+  wordLessons: number[];
+  mixWordLessons: boolean;
+  wordGroups: string[];
+  showRomaji: boolean;
   soundEnabled: boolean;
   hapticsEnabled: boolean;
 }
@@ -65,6 +101,9 @@ export interface PracticeSessionProps {
   studyMode: StudyMode;
   direction: Direction;
   stats: StatsMap;
+  scopeLabel: string;
+  onChangeContent: () => void;
+  showRomaji?: boolean;
   onUpdateStats: (id: string, result: ReviewResult, direction: Direction) => void;
   onPlaySound?: (effectName: FeedbackEffect) => void;
   onTriggerHaptics?: (effectName: FeedbackEffect) => void;
@@ -83,9 +122,6 @@ export interface SettingsViewProps {
   wordItems: CardItem[];
   setWordItems: Dispatch<SetStateAction<CardItem[]>>;
   hapticsSupported: boolean;
-  showCharacterOptionsSection: boolean;
-  showKanjiReadingSettings: boolean;
-  showKanaVariationSettings: boolean;
 }
 
 export type SettingsViewComponent = ComponentType<SettingsViewProps>;

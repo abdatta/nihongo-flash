@@ -10,7 +10,7 @@ import {
   WORD_ITEMS_STORAGE_KEY,
 } from './storageKeys';
 import { DAY_IN_MS, DEFAULT_EASE, DEFAULT_SETTINGS, MIN_EASE, RECENT_RESULTS_LIMIT } from './appConstants';
-import type { CardItem, CardStats, CardType, Direction, DirectionStats, SettingsState, StudyMode, StatsMap } from './types';
+import type { CardItem, CardStats, CardType, Direction, DirectionStats, KanaOptions, SettingsState, StudyMode, StatsMap } from './types';
 
 export type ImportConflictChoice = 'local' | 'imported';
 
@@ -187,6 +187,21 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
   const safeSettings = storedSettings as Partial<SettingsState> & Record<string, unknown>;
   const hasStoredOnyomiPreference = typeof safeSettings.showOnyomi === 'boolean';
   const hasStoredKunyomiPreference = typeof safeSettings.showKunyomi === 'boolean';
+  const normalizeKanaOptions = (value: unknown): KanaOptions => {
+    const options = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Partial<KanaOptions> : {};
+    return {
+      basic: typeof options.basic === 'boolean' ? options.basic : true,
+      dakuten: typeof options.dakuten === 'boolean' ? options.dakuten : safeSettings.dakuten === true,
+      handakuten: typeof options.handakuten === 'boolean' ? options.handakuten : safeSettings.handakuten === true,
+      yoon: typeof options.yoon === 'boolean' ? options.yoon : safeSettings.yoon === true,
+    };
+  };
+  const normalizeLessons = (value: unknown, fallback: number[], mixed: boolean): number[] => {
+    if (!Array.isArray(value)) return fallback;
+    const lessons = [...new Set(value.filter((lesson): lesson is number => Number.isInteger(lesson) && lesson >= 0 && lesson <= 10))];
+    return mixed ? lessons : lessons.slice(0, 1);
+  };
 
   return {
     ...(safeSettings.studyMode === 'words' || safeSettings.studyMode === 'characters' ? { studyMode: safeSettings.studyMode } : {}),
@@ -199,6 +214,17 @@ const normalizeStoredSettings = (storedSettings: unknown): Partial<SettingsState
     ...(typeof safeSettings.dakuten === 'boolean' ? { dakuten: safeSettings.dakuten } : {}),
     ...(typeof safeSettings.handakuten === 'boolean' ? { handakuten: safeSettings.handakuten } : {}),
     ...(typeof safeSettings.yoon === 'boolean' ? { yoon: safeSettings.yoon } : {}),
+    hiraganaOptions: normalizeKanaOptions(safeSettings.hiraganaOptions),
+    katakanaOptions: normalizeKanaOptions(safeSettings.katakanaOptions),
+    tobiraKanji: safeSettings.tobiraKanji === true,
+    characterLessons: normalizeLessons(safeSettings.characterLessons, [3], safeSettings.mixCharacterLessons === true),
+    mixCharacterLessons: safeSettings.mixCharacterLessons === true,
+    // Existing users keep their editable words deck when migrating.
+    wordSource: safeSettings.wordSource === 'tobira' ? 'tobira' : 'personal',
+    wordLessons: normalizeLessons(safeSettings.wordLessons, [0], safeSettings.mixWordLessons === true),
+    mixWordLessons: safeSettings.mixWordLessons === true,
+    wordGroups: Array.isArray(safeSettings.wordGroups) ? [...new Set(safeSettings.wordGroups.filter((group): group is string => typeof group === 'string'))] : [],
+    showRomaji: safeSettings.showRomaji === true,
     ...(typeof safeSettings.soundEnabled === 'boolean' ? { soundEnabled: safeSettings.soundEnabled } : {}),
     ...(typeof safeSettings.hapticsEnabled === 'boolean' ? { hapticsEnabled: safeSettings.hapticsEnabled } : {}),
   };
@@ -255,6 +281,10 @@ export const normalizeStoredCardItems = (
 
     const itemId = typeof safeItem.id === 'string' && safeItem.id.trim() ? safeItem.id : `${studyMode}_${Date.now()}_${index}`;
     const fallbackItem = fallbackItemsById.get(itemId);
+    const kana = typeof safeItem.kana === 'string' && safeItem.kana.trim() ? safeItem.kana.trim() : fallbackItem?.kana;
+    const acceptedAnswers = Array.isArray(safeItem.acceptedAnswers)
+      ? safeItem.acceptedAnswers.filter((answer): answer is string => typeof answer === 'string' && !!answer.trim()).map(answer => answer.trim())
+      : fallbackItem?.acceptedAnswers;
 
     const itemType = safeItem.type === 'hiragana' || safeItem.type === 'katakana' || safeItem.type === 'kanji' || safeItem.type === 'word'
       ? safeItem.type
@@ -276,6 +306,8 @@ export const normalizeStoredCardItems = (
       studyMode,
       meanings: studyMode === 'words' ? meanings : undefined,
       ...(typeof frequency === 'number' ? { frequency } : {}),
+      ...(kana ? { kana } : {}),
+      ...(acceptedAnswers?.length ? { acceptedAnswers } : {}),
     });
 
     return acc;

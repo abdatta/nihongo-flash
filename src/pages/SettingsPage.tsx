@@ -15,9 +15,6 @@ export default function SettingsPage({
   wordItems,
   setWordItems,
   hapticsSupported,
-  showCharacterOptionsSection,
-  showKanjiReadingSettings,
-  showKanaVariationSettings,
 }: SettingsPageProps) {
   return (
     <SettingsViewComponent
@@ -30,9 +27,6 @@ export default function SettingsPage({
       wordItems={wordItems}
       setWordItems={setWordItems}
       hapticsSupported={hapticsSupported}
-      showCharacterOptionsSection={showCharacterOptionsSection}
-      showKanjiReadingSettings={showKanjiReadingSettings}
-      showKanaVariationSettings={showKanaVariationSettings}
     />
   );
 }

@@ -1,0 +1,303 @@
+# Core highlighted reading/writing targets and New readings, supplied Tobira I scan.
+# @lesson; written form|kana|meaning; targets shared by rows/lessons become one card.
+@3
+一|いち|One
+一月|いちがつ|January
+一人|ひとり|One person
+一人っ子|ひとりっこ|An only child
+一人で|ひとりで|Alone
+二|に|Two
+二月|にがつ|February
+二年生|にねんせい|A second-year student
+二人|ふたり|Two people
+三|さん|Three
+三月|さんがつ|March
+三人|さんにん|Three people
+四月|しがつ|April
+四|し|Four
+四|よん|Four
+四人|よにん|Four people
+五|ご|Five
+五月|ごがつ|May
+五人|ごにん|Five people
+六|ろく|Six
+六月|ろくがつ|June
+六人|ろくにん|Six people
+七月|しちがつ|July
+七人|しちにん|Seven people
+七人|ななにん|Seven people
+七|なな|Seven
+八|はち|Eight
+八月|はちがつ|August
+八人|はちにん|Eight people
+九|きゅう|Nine
+九|く|Nine
+九人|きゅうにん|Nine people
+十|じゅう|Ten
+十月|じゅうがつ|October
+十人|じゅうにん|Ten people
+一月|いちがつ|January
+十二月|じゅうにがつ|December
+私|わたし|I; myself
+子ども|こども|A child
+お子さん|おこさん|Someone else's child
+アメリカ人|アメリカじん|An American person
+三人|さんにん|Three people
+人|ひと|A person
+@4
+百|ひゃく|One hundred
+三百|さんびゃく|Three hundred
+六百|ろっぴゃく|Six hundred
+八百|はっぴゃく|Eight hundred
+百人|ひゃくにん|One hundred people
+千|せん|One thousand
+三千|さんぜん|Three thousand
+八千|はっせん|Eight thousand
+千円|せんえん|One thousand yen
+千人|せんにん|One thousand people
+一万|いちまん|Ten thousand
+十万|じゅうまん|One hundred thousand
+円|えん|Yen; a circle
+百円|ひゃくえん|One hundred yen
+日曜日|にちようび|Sunday
+月曜日|げつようび|Monday
+火曜日|かようび|Tuesday
+水曜日|すいようび|Wednesday
+木曜日|もくようび|Thursday
+金曜日|きんようび|Friday
+土曜日|どようび|Saturday
+水|みず|Water
+お金|おかね|Money
+大学|だいがく|A university
+大学生|だいがくせい|A university student
+学生|がくせい|A student
+先生|せんせい|A teacher
+先月|せんげつ|Last month
+一年生|いちねんせい|A first-year student
+大きい|おおきい|Big
+小さい|ちいさい|Small
+一つ|ひとつ|One object
+二つ|ふたつ|Two objects
+三つ|みっつ|Three objects
+四つ|よっつ|Four objects
+五つ|いつつ|Five objects
+六つ|むっつ|Six objects
+七つ|ななつ|Seven objects
+八つ|やっつ|Eight objects
+九つ|ここのつ|Nine objects
+十|とお|Ten objects
+@5
+上|うえ|Above; on top
+上田さん|うえださん|Ueda (family name, with title)
+下|した|Below
+山下さん|やましたさん|Yamashita (family name, with title)
+中|なか|Inside
+外|そと|Outside
+右|みぎ|Right
+左|ひだり|Left
+山|やま|A mountain
+山川さん|やまかわさん|Yamakawa (family name, with title)
+川|かわ|A river
+寺|てら|A Buddhist temple
+お寺|おてら|A Buddhist temple (polite)
+何|なに|What
+何|なん|What
+何月|なんがつ|What month
+何日|なんにち|What date; how many days
+何曜日|なんようび|What day of the week
+何時|なんじ|What time
+何時間|なんじかん|How many hours
+何人|なんにん|How many people
+何年|なんねん|What year
+何年生|なんねんせい|What year in school
+一時|いちじ|One o'clock
+四時|よじ|Four o'clock
+時間|じかん|Time
+四時間|よじかん|Four hours
+子どもの時|こどものとき|In childhood
+間|あいだ|Between
+毎年|まいとし|Every year
+毎年|まいねん|Every year
+毎日|まいにち|Every day
+今月|こんげつ|This month
+今年|ことし|This year
+今|いま|Now
+今日|きょう|Today
+田中さん|たなかさん|Tanaka (family name, with title)
+山田さん|やまださん|Yamada (family name, with title)
+町|まち|A town
+花|はな|A flower
+一日|ついたち|First day of the month
+二日|ふつか|Second day of the month
+三日|みっか|Third day of the month
+四日|よっか|Fourth day of the month
+五日|いつか|Fifth day of the month
+六日|むいか|Sixth day of the month
+七日|なのか|Seventh day of the month
+八日|ようか|Eighth day of the month
+九日|ここのか|Ninth day of the month
+十日|とおか|Tenth day of the month
+二十日|はつか|Twentieth day of the month
+一ぴき|いっぴき|One small animal
+十ぴき|じゅっぴき|Ten small animals
+十ぴき|じっぴき|Ten small animals
+木|き|A tree
+明日|あした|Tomorrow
+@6
+食べる|たべる|To eat
+飲む|のむ|To drink
+言う|いう|To say
+話|はなし|A story
+話す|はなす|To speak
+行く|いく|To go
+来週|らいしゅう|Next week
+来月|らいげつ|Next month
+来年|らいねん|Next year
+来る|くる|To come
+来ます|きます|To come (polite)
+見る|みる|To see; watch
+見える|みえる|To be visible
+見せる|みせる|To show
+持つ|もつ|To hold
+本|ほん|A book
+日本|にほん|Japan
+日本語|にほんご|Japanese (language)
+日本人|にほんじん|A Japanese person
+本田さん|ほんださん|Honda (family name, with title)
+体|からだ|The body
+口|くち|A mouth
+目|め|An eye
+耳|みみ|An ear
+手|て|A hand
+足|あし|A foot; leg
+一週間|いっしゅうかん|One week
+何週間|なんしゅうかん|How many weeks
+先週|せんしゅう|Last week
+今週|こんしゅう|This week
+毎週|まいしゅう|Every week
+一回|いっかい|Once
+二回|にかい|Twice
+何回|なんかい|How many times
+@7
+会う|あう|To meet
+聞く|きく|To listen; hear; ask
+聞こえる|きこえる|To be audible
+読む|よむ|To read
+立つ|たつ|To stand
+住む|すむ|To take up residence
+住んでいる|すんでいる|To live somewhere
+知る|しる|To get to know
+知っている|しっている|To know
+入る|はいる|To enter
+売る|うる|To sell
+買う|かう|To buy
+物|もの|A physical object
+買い物|かいもの|Shopping
+食べ物|たべもの|Food
+飲み物|のみもの|A drink
+音楽|おんがく|Music
+音|おと|A sound
+楽しい|たのしい|Fun
+海|うみ|The sea
+中国|ちゅうごく|China
+国|くに|A country
+門|もん|A gate
+矢|や|An arrow
+貝|かい|A shell; shellfish
+牛|うし|A cow
+日|ひ|A day
+@8
+男|おとこ|A male
+男の人|おとこのひと|A man
+女|おんな|A female
+女の人|おんなのひと|A woman
+好き|すき|To like
+大好き|だいすき|To love; like very much
+作る|つくる|To make
+出す|だす|To take out; submit
+出かける|でかける|To go out
+書く|かく|To write
+一分|いっぷん|One minute
+五分|ごふん|Five minutes
+何分|なんぷん|How many minutes
+分かる|わかる|To understand
+午前|ごぜん|AM; before noon
+午後|ごご|PM; afternoon
+前|まえ|Before; in front
+本の前|ほんのまえ|In front of a book
+クラスの前に|クラスのまえに|Before class
+名前|なまえ|A name
+クラスの後で|クラスのあとで|After class
+後で|あとで|Later
+本の後ろ|ほんのうしろ|Behind a book
+有名|ゆうめい|Famous
+父|ちち|My father
+お父さん|おとうさん|Someone else's father
+母|はは|My mother
+お母さん|おかあさん|Someone else's mother
+兄弟|きょうだい|Siblings; brothers
+兄|あに|My older brother
+お兄さん|おにいさん|Someone else's older brother
+弟|おとうと|My younger brother
+弟さん|おとうとさん|Someone else's younger brother
+姉|あね|My older sister
+お姉さん|おねえさん|Someone else's older sister
+妹|いもうと|My younger sister
+妹さん|いもうとさん|Someone else's younger sister
+外国語|がいこくご|A foreign language
+来ない|こない|To not come
+上手|じょうず|Skillful
+下手|へた|Unskillful
+@9
+思う|おもう|To think
+休み|やすみ|A break; holiday
+休む|やすむ|To rest; be absent
+悪い|わるい|Bad
+気分が悪い|きぶんがわるい|To feel ill; feel down
+新聞|しんぶん|A newspaper
+新しい|あたらしい|New
+古い|ふるい|Old (things)
+高校|こうこう|High school
+高い|たかい|High; expensive
+学校|がっこう|A school
+雨|あめ|Rain
+雪|ゆき|Snow
+晴れ|はれ|Sunny weather
+晴れる|はれる|To become sunny
+十度|じゅうど|Ten degrees
+何度|なんど|How many degrees
+今度|こんど|This time; next time
+天気|てんき|The weather
+気分|きぶん|A mood; feeling
+元気|げんき|Healthy; energetic
+人気がある|にんきがある|To be popular
+病気|びょうき|An illness
+元気がない|げんきがない|To be low in energy
+英語|えいご|English (language)
+家|いえ|A house
+心|こころ|The heart; mind
+@10
+帰る|かえる|To return home
+使う|つかう|To use
+暗い|くらい|Dark
+早い|はやい|Early
+早く|はやく|Early (adverb)
+広い|ひろい|Wide; spacious
+安い|やすい|Cheap; inexpensive
+親切|しんせつ|Kind; helpful
+大切|たいせつ|Important; precious
+一番|いちばん|The most; best; first
+会社|かいしゃ|A company
+社長|しゃちょう|A company president
+長い|ながい|Long
+書道|しょどう|Japanese calligraphy
+道|みち|A road
+昔|むかし|The past; long ago
+友達|ともだち|A friend
+作文|さくぶん|An essay
+文化|ぶんか|Culture
+文学|ぶんがく|Literature
+週末|しゅうまつ|The weekend
+明るい|あかるい|Bright; cheerful
+作家|さっか|A writer
+花火|はなび|Fireworks

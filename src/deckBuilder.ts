@@ -20,6 +20,10 @@ export const pickRandomCards = <TCard>(cards: TCard[], count: number): TCard[] =
   shuffleCards(cards).slice(0, Math.max(0, count))
 );
 
+export const buildFullDeckQueue = (cards: CardItem[]): CardItem[] => (
+  shuffleCards([...new Map(cards.map(card => [card.id, card])).values()])
+);
+
 export const pickExperimentalNewCards = (cards: CardItem[], count: number): CardItem[] => {
   const frequencyCards = cards.filter(card => typeof card.frequency === 'number' && Number.isFinite(card.frequency));
   const nonFrequencyCards = cards.filter(card => typeof card.frequency !== 'number' || !Number.isFinite(card.frequency));
@@ -83,7 +87,9 @@ export const buildSessionQueueFromBuckets = (
     ...pickRandomCards(buckets.strong, strongTarget),
     ...pickRandomCards(buckets.weak, weakTarget),
     ...pickRandomCards(buckets.improving, improvingTarget),
-    ...pickExperimentalNewCards(buckets.new, newTarget + extraNewTarget),
+    ...(buckets.new.length > 0 && buckets.new.every(card => typeof card.order === 'number')
+      ? [...buckets.new].sort((a, b) => a.order! - b.order!).slice(0, newTarget + extraNewTarget)
+      : pickExperimentalNewCards(buckets.new, newTarget + extraNewTarget)),
   ];
 
   return shuffleCards(selected);

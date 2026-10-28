@@ -1,0 +1,748 @@
+# Tobira I vocabulary lists, supplied Japanese-edition scan. Lesson 0–2 IDs/data remain unchanged.
+# @lesson|category; kana|meaning (paraphrased)|optional alternative answers
+# Templates use concrete textbook-topic examples rather than unanswerable blanks.
+@3|verbs
+シャワーをあびる|To take a shower
+あう|To meet someone
+あそぶ|To play; spend time having fun
+およぐ|To swim
+かく|To write
+つくる|To make
+のる|To ride; get on a vehicle
+はなす|To speak
+はいる|To enter
+おふろにはいる|To take a bath
+しゃしんをとる|To take a photograph
+せんたくする|To do laundry
+そうじする|To clean
+りょうりする|To cook
+うんどうする|To exercise
+りょこうする|To travel
+デートする|To go on a date
+@3|nouns
+ごかぞく|Someone else's family
+かぞく|My family; family in general
+おじいさん|Someone else's grandfather
+そふ|My grandfather
+おばあさん|Someone else's grandmother
+そぼ|My grandmother
+ごりょうしん|Someone else's parents
+りょうしん|My parents
+おとうさん|Someone else's father
+ちち|My father
+おかあさん|Someone else's mother
+はは|My mother
+ごきょうだい|Someone else's siblings
+きょうだい|My siblings; siblings in general
+おにいさん|Someone else's older brother
+あに|My older brother
+おねえさん|Someone else's older sister
+あね|My older sister
+いもうとさん|Someone else's younger sister
+いもうと|My younger sister
+おとうとさん|Someone else's younger brother
+おとうと|My younger brother
+おこさん|Someone else's child
+こども|My child; a child
+ひとりっこ|An only child
+ひと|A person
+たべもの|Food
+さかな|Fish
+にく|Meat
+やさい|Vegetables
+すし|Sushi|おすし
+おかし|Snacks; sweets
+のみもの|A drink; beverage
+さけ|Alcohol; sake|おさけ
+かんじ|Kanji; Chinese characters
+たんご|A word; vocabulary
+てがみ|A letter (correspondence)
+じてんしゃ|A bicycle
+うみ|The sea; ocean
+こうえん|A park
+こうこう|High school
+なつやすみ|Summer vacation
+イヌ|A dog
+ネコ|A cat
+ペット|A pet
+サラダ|Salad
+パン|Bread
+ピザ|Pizza
+ケーキ|Cake
+コーラ|Cola
+ビール|Beer
+メール|Email
+@3|time
+きょねん|Last year
+ことし|This year
+せんげつ|Last month
+せんしゅう|Last week
+きのう|Yesterday
+けさ|This morning
+ばん|Evening; night
+こんばん|This evening; tonight
+@3|conjunctions
+そして|And then; also
+@3|counters
+にん|Counter for people
+ひとり|One person
+ふたり|Two people
+さんにん|Three people
+よにん|Four people
+なんにん|How many people
+がつ|Suffix for a calendar month
+@3|time
+いちがつ|January
+にがつ|February
+さんがつ|March
+しがつ|April
+ごがつ|May
+ろくがつ|June
+しちがつ|July
+はちがつ|August
+くがつ|September
+じゅうがつ|October
+じゅういちがつ|November
+じゅうにがつ|December
+@3|questions
+なんがつ|What month
+@3|adverbs
+ぜひ|By all means
+いっしょに|Together
+ひとりで|Alone; by oneself
+@3|expressions
+すしはどうですか|How about sushi?
+すしはちょっと|Sushi doesn't really work for me (indirectly declining)
+そうしましょう|Let's do that
+こどものとき|When I was a child
+@4|verbs
+うたう|To sing
+かかる|To cost money; take time
+@4|i-adjectives
+あたらしい|New; fresh
+ふるい|Old (things)
+おおきい|Big; large
+ちいさい|Small
+たかい|High; expensive
+やすい|Cheap; inexpensive
+あつい|Hot (weather or things)
+さむい|Cold (weather)
+おいしい|Delicious
+いい|Good|よい
+かっこいい|Good-looking; cool
+かわいい|Cute
+おもしろい|Interesting; funny
+たのしい|Fun; enjoyable
+つまらない|Boring
+いそがしい|Busy (a person or schedule)
+やさしい|Kind; easy
+むずかしい|Difficult
+@4|na-adjectives
+きれい|Beautiful; clean
+しずか|Quiet
+にぎやか|Lively; bustling
+げんき|Healthy; energetic
+たいへん|Tough; demanding
+まあまあ|So-so; okay
+ゆうめい|Famous
+すき|To like; fond of
+だいすき|To love; like very much
+@4|nouns
+みんな|Everyone; everything
+かね|Money|おかね
+くるま|A car
+ちかてつ|The subway
+でんしゃ|A train
+ひこうき|An airplane
+はし|Chopsticks|おはし
+て|A hand
+えんぴつ|A pencil
+かばん|A bag|バッグ
+きっぷ|A ticket|チケット
+じしょ|A dictionary
+とけい|A clock; watch
+ぼうし|A hat; cap
+まち|A town; city
+おすすめ|A recommendation
+タクシー|A taxi
+バス|A bus
+バスてい|A bus stop
+Ｔシャツ|A T-shirt|ティーシャツ;Tシャツ
+ノート|A notebook
+@4|demonstratives
+これ|This one (near me)
+それ|That one (near you)
+あれ|That one over there
+このほん|This book
+そのほん|That book (near you)
+あのほん|That book over there
+@4|adverbs
+たいてい|Usually; almost always
+とても|Very
+@4|questions
+いくら|How much money
+だれのほん|Whose book
+どう|How; how about
+どうやって|How; by what means
+どのほん|Which book
+どのくらい|How much; how long; how far|どのぐらい
+どれ|Which one
+どんなほん|What kind of book
+なにで|By what means|なんで
+@4|numbers
+ひゃく|One hundred
+せん|One thousand
+まん|Ten thousand
+@4|counters
+えん|Yen (currency suffix)
+ドル|Dollar (currency suffix)
+ふん|Minutes (counter)
+いっぷん|One minute
+にふん|Two minutes
+さんぷん|Three minutes
+なんぷん|How many minutes
+じかん|Hours (duration counter)
+いちじかん|One hour
+にじかん|Two hours
+さんじかん|Three hours
+いちじかんはん|One and a half hours
+なんじかん|How many hours
+つ|General counter for objects
+ひとつ|One object
+ふたつ|Two objects
+みっつ|Three objects
+いくつ|How many objects
+くらい|Approximately (quantity suffix)|ぐらい
+@4|expressions
+あるいて|On foot
+すしにする|To choose sushi (when ordering)
+ほんとうですか|Really? Is that true?
+みんなで|All together
+@5|verbs
+いる|To exist; be somewhere (a person or animal)
+きこえる|To be audible; can hear
+みえる|To be visible; can see
+ある|To exist; be somewhere; have (a thing or event)
+にんきがある|To be popular
+かんこうする|To go sightseeing
+@5|i-adjectives
+うるさい|Noisy; annoyingly loud
+@5|na-adjectives
+ざんねん|Disappointing; unfortunate
+@5|nouns
+たんじょうび|A birthday
+たてもの|A building
+ちか|Underground; a basement
+おてあらい|A restroom; toilet|トイレ
+ところ|A place
+えいがかん|A movie theater
+てら|A Buddhist temple|おてら
+じんじゃ|A Shinto shrine
+ぎんこう|A bank
+びじゅつかん|An art museum
+びょういん|A hospital
+ゆうびんきょく|A post office
+かわ|A river
+き|A tree
+やま|A mountain
+とり|A bird
+はな|A flower
+おと|A sound
+こえ|A voice
+いす|A chair
+つくえ|A desk
+まど|A window
+しあい|A game; match (sports)
+じかん|Time
+エーティーエム|An ATM|ATM;ＡＴＭ
+コンビニ|A convenience store
+ホテル|A hotel
+キッチン|A kitchen
+リビング|A living room
+ソファ|A sofa; couch|ソファー
+テーブル|A table
+ベッド|A bed
+ドア|A door
+イベント|An event
+@5|locations
+うえ|Above; on top of
+した|Below; underneath
+まえ|In front of
+うしろ|Behind
+ひだり|Left
+みぎ|Right
+そと|Outside
+なか|Inside
+あいだ|Between
+ちかく|Near; nearby
+となり|Next to (things of the same kind)
+よこ|Beside
+@5|demonstratives
+ここ|Here
+そこ|There (near you)
+あそこ|Over there
+@5|time
+こんげつ|This month
+らいげつ|Next month
+まいとし|Every year
+@5|adverbs
+ぜんぶ|All; everything
+@5|counters
+かい|Counter for floors
+いっかい|First floor
+なんかい|What floor
+ひき|Counter for small animals
+いっぴき|One small animal
+なんびき|How many small animals
+まい|Counter for flat objects
+いちまい|One flat object
+なんまい|How many flat objects
+や|Shop; store (suffix)
+ほんや|A bookstore
+はなや|A flower shop
+にち|Day of the month (suffix)
+@5|time
+ついたち|First day of the month
+ふつか|Second day of the month
+みっか|Third day of the month
+よっか|Fourth day of the month
+いつか|Fifth day of the month
+むいか|Sixth day of the month
+なのか|Seventh day of the month
+ようか|Eighth day of the month
+ここのか|Ninth day of the month
+とおか|Tenth day of the month
+はつか|Twentieth day of the month
+@5|questions
+なんにち|What day of the month
+なんねん|What year
+@5|counters
+ねん|Calendar year (suffix)
+@5|expressions
+ぜんぶで|In total
+よかったら|If you like; if possible
+@6|verbs
+おしえる|To teach; tell
+こたえる|To answer
+みせる|To show
+おぼえる|To memorize
+おぼえています|To remember; have not forgotten
+きる|To put on clothing above the waist
+きています|To be wearing clothing above the waist
+めがねをかける|To put on glasses
+めがねをかけています|To be wearing glasses
+やせる|To lose weight
+やせています|To be thin
+あるく|To walk
+いう|To say
+さがす|To search for
+しぬ|To die
+すわる|To sit down
+たつ|To stand up
+だす|To take out; submit
+てつだう|To help
+はたらく|To work
+はをみがく|To brush one's teeth
+まつ|To wait
+かぶる|To put on a hat
+かぶっています|To be wearing a hat
+しる|To get to know; learn of
+しっています|To know
+しりません|To not know
+すむ|To take up residence
+すんでいます|To live somewhere
+はく|To put on shoes or clothing below the waist
+はいています|To be wearing shoes or clothing below the waist
+もつ|To hold; carry
+もっています|To have; own; be holding
+ふとる|To gain weight
+ふとっています|To be heavyset
+する|To put on a tie or accessory
+しています|To be wearing a tie or accessory
+さんぽする|To take a walk
+しつもんする|To ask a question
+れんしゅうする|To practice
+けっこんする|To get married
+けっこんしています|To be married
+@6|i-adjectives
+あおい|Blue (adjective)
+あかい|Red (adjective)
+きいろい|Yellow (adjective)
+くろい|Black (adjective)
+しろい|White (adjective)
+ちゃいろい|Brown (adjective)
+ながい|Long (length)
+みじかい|Short (length)
+あたまがいい|Intelligent; smart
+せがたかい|Tall (a person)
+せがひくい|Short (a person)
+@6|nouns
+あたま|The head
+かみ|Hair
+かお|A face
+め|An eye
+はな|A nose
+くち|A mouth
+みみ|An ear
+からだ|The body
+おなか|The stomach; belly
+あし|A foot; leg
+めがね|Glasses
+ふく|Clothes
+くつ|Shoes
+いろ|A color
+あお|Blue (color noun)
+あか|Red (color noun)
+きいろ|Yellow (color noun)
+くろ|Black (color noun)
+しろ|White (color noun)
+ちゃいろ|Brown (color noun)
+みどり|Green (color noun)
+こたえ|An answer
+はなし|A story
+ネクタイ|A necktie
+セーター|A sweater
+ジーンズ|Jeans
+スカート|A skirt
+パソコン|A personal computer
+@6|questions
+なにいろ|What color
+@6|counters
+かい|Times; occurrences (counter)
+にちかん|Days (duration counter)|にち
+しゅうかん|Weeks (duration counter)
+かげつ|Months (duration counter)|かげつかん
+ねんかん|Years (duration counter)|ねん
+@6|adverbs
+いつも|Always
+たぶん|Probably; perhaps
+まだ|Not yet (with a negative)
+もう|Already; yet
+@6|expressions
+だけ|Only (particle)
+もしもし|Hello (on the telephone)
+@7|verbs
+あげる|To give (to someone)
+くれる|To give (to me or my family)
+うる|To sell
+かう|To keep an animal as a pet
+つかう|To use
+とまる|To stay overnight
+ならう|To learn from someone
+のぼる|To climb
+もらう|To receive
+ひっこしする|To move house|ひっこしをする
+@7|i-adjectives
+うれしい|Happy; glad
+かなしい|Sad
+きたない|Dirty; messy
+こわい|Scary; frightening
+すごい|Amazing; awesome
+ほしい|To want a thing
+@7|na-adjectives
+いろいろ|Various
+しんせつ|Kind; helpful
+へん|Strange; unusual
+べんり|Convenient; useful
+@7|nouns
+かのじょ|She; girlfriend
+かれ|He; boyfriend
+みなさん|Everyone (polite, people only)
+どうぶつ|An animal
+おいわい|A celebration; congratulatory gift
+みやげ|A souvenir; gift brought when visiting|おみやげ
+おもちゃ|A toy
+きもの|A kimono
+けいたいでんわ|A mobile phone|ケータイ
+さいふ|A wallet
+てぶくろ|Gloves
+ぬいぐるみ|A stuffed toy
+もの|A physical object; thing
+ゆびわ|A ring (jewelry)
+いみ|A meaning
+しけん|A test; exam
+しゅうかん|A habit; custom
+じゅぎょう|A class (instruction)
+ゆめ|A dream
+おんせん|A hot spring
+かいしゃ|A company
+みせ|A shop; restaurant|おみせ
+りょかん|A traditional Japanese inn
+くに|A country
+せかい|The world
+ひ|A day
+しょうがつ|New Year's holiday|おしょうがつ
+クリスマス|Christmas
+ハロウィン|Halloween
+バレンタインデー|Valentine's Day
+チョコレート|Chocolate|チョコ
+プレゼント|A gift; present
+マスク|A face mask
+マフラー|A winter scarf
+スニーカー|Sneakers
+アプリ|An app
+@7|time
+こんど|This time; next time; near future
+さいきん|Recently
+らいねん|Next year
+@7|adverbs
+もっと|More (amount or degree)
+@7|questions
+どうして|Why
+@7|expressions
+なにか|Something; anything (in a question)
+なにもない|There is nothing
+だれか|Someone; anyone (in a question)
+だれもいない|There is nobody
+だれともはなさない|To not talk with anyone
+だれにもあわない|To not meet anyone
+どこか|Somewhere; anywhere (in a question)
+どこにもいかない|To not go anywhere
+じゅぎょうのまえに|Before class
+またあした|See you tomorrow
+@8|verbs
+うける|To take a test
+おくれる|To be late
+かりる|To borrow
+かんがえる|To think; consider
+しらべる|To look up; investigate
+でかける|To go out
+はじめる|To begin; start
+わすれる|To forget; leave behind
+あらう|To wash
+おくる|To send; give someone a ride
+おどる|To dance
+かく|To draw; paint
+かす|To lend
+がんばる|To work hard; persevere
+きょうみがある|To be interested in
+たばこをすう|To smoke cigarettes|タバコをすう
+とる|To take; pick up
+つれていく|To take a person somewhere
+むかえにいく|To go and pick someone up
+ひく|To play a stringed or keyboard instrument
+ピアノをひく|To play the piano
+バイオリンをひく|To play the violin
+ギターをひく|To play the guitar
+ふく|To blow; play a wind instrument
+フルートをふく|To play the flute
+わかる|To understand
+つれてくる|To bring a person
+むかえにくる|To come and pick someone up
+うんてんする|To drive
+おねがいする|To ask a favor
+おねがいがある|To have a favor to ask
+けんきゅうする|To research
+しょうかいする|To introduce
+せんこうする|To major in
+そうだんする|To consult; ask for advice
+そうだんがある|To have something to ask advice about
+でんわする|To make a phone call|でんわをする
+りゅうがくする|To study abroad
+インターンシップする|To do an internship|インターンシップをする
+@8|i-adjectives
+ちかい|Nearby; close (adjective)
+@8|na-adjectives
+じょうず|Skillful; good at (objective assessment)
+へた|Unskillful; bad at (objective assessment)
+とくい|Good at; confident in (one's own assessment)
+にがて|Not good at; uncomfortable with (one's own assessment)
+きらい|To dislike
+ひま|Free; having spare time
+@8|nouns
+あなた|You (general, without specifying an addressee)
+さら|A dish; plate|おさら
+え|A picture; painting
+がいこくご|A foreign language
+きょうかしょ|A textbook
+さくぶん|An essay; composition
+しゅうきょう|Religion
+しょどう|Japanese calligraphy
+しょうがくきん|A scholarship
+すいせんじょう|A recommendation letter
+ぶんか|Culture
+ぶんがく|Literature
+ぶんぽう|Grammar
+れきし|History
+よてい|A plan; schedule
+えき|A train station
+きょうかい|A church
+くうこう|An airport
+オフィス|An instructor's office|けんきゅうしつ
+スーパー|A supermarket
+@8|time
+まいあさ|Every morning
+まいばん|Every evening
+まいしゅう|Every week
+@8|adverbs
+あさはやく|Early in the morning
+よるおそく|Late at night
+すごく|Very; really
+すこし|A little; a few
+@8|expressions
+もうすこし|A little more|もうちょっと
+あとで|Later
+にほんについて|About Japan
+ごめん|Sorry (casual)
+ひさしぶりです|Long time no see|おひさしぶりです
+しつれいします|Excuse me; goodbye (formal, entering or leaving someone's space)
+@9|verbs
+かたづける|To tidy up; put away
+すてる|To throw away
+つかれる|To get tired
+はれる|To become sunny
+わかれる|To break up; part ways
+あめがふる|To rain
+ゆきがふる|To snow
+あめがやむ|To stop raining
+ゆきがやむ|To stop snowing
+くもる|To become cloudy
+おなかがすく|To get hungry
+のどがかわく|To get thirsty
+かぜをひく|To catch a cold
+ねつがある|To have a fever
+やすむ|To rest; be absent
+おもう|To think (an opinion)
+なく|To cry
+わらう|To laugh; smile
+けんかする|To quarrel; fight
+@9|i-adjectives
+あまい|Sweet
+からい|Spicy
+あたたかい|Warm
+つめたい|Cold (touch or a person's manner)
+すずしい|Cool (weather)
+なかがいい|To get along well
+なかがわるい|To be on bad terms
+いたい|Painful; sore
+さびしい|Lonely
+ねむい|Sleepy
+まずい|Bad-tasting
+わるい|Bad
+@9|na-adjectives
+だいじょうぶ|All right; safe; okay
+まじめ|Diligent; serious-minded
+@9|nouns
+てんき|The weather
+てんきよほう|A weather forecast
+あめ|Rain
+くもり|Cloudy weather
+きおん|Air temperature
+たいふう|A typhoon
+はれ|Sunny weather
+ゆき|Snow
+はる|Spring
+なつ|Summer
+あき|Autumn; fall
+ふゆ|Winter
+きぶん|A feeling; mood
+は|A tooth
+びょうき|An illness
+ごみ|Trash; garbage|ゴミ
+しんぶん|A newspaper
+せいかつ|Daily life; lifestyle
+がいこく|A foreign country
+カラオケ|Karaoke
+マイナス|Minus
+@9|counters
+ど|Degrees (temperature counter)
+れいど|Zero degrees
+じゅうど|Ten degrees
+マイナスごど|Minus five degrees
+なんど|What temperature; how many degrees
+がっき|Semester (suffix)
+@9|time
+せんがっき|Last semester
+こんがっき|This semester
+らいがっき|Next semester
+@9|expressions
+きぶんがいい|To feel well; be in a good mood
+きぶんがわるい|To feel ill; feel down
+おなじクラス|The same class
+じつは|Actually; to tell the truth
+ゆっくり|Slowly; in a relaxed way
+おだいじに|Get well soon; take care
+げんきがない|To be low in energy; out of sorts
+どうしたんですか|What's wrong? What happened?
+@10|verbs
+きめる|To decide
+たすける|To rescue; help out of trouble
+かわる|To change
+なる|To become
+じゅんびする|To prepare
+ホームステイする|To do a homestay|ホームステイをする
+@10|i-adjectives
+あかるい|Bright; cheerful
+くらい|Dark; gloomy
+おおい|Numerous; plentiful
+すくない|Few; not much
+はやい|Fast; early
+おそい|Slow; late
+つよい|Strong
+よわい|Weak
+ひろい|Wide; spacious
+せまい|Narrow; cramped
+かるい|Light (weight)
+おもい|Heavy
+わかい|Young
+あぶない|Dangerous
+@10|na-adjectives
+あんぜん|Safe; secure
+しあわせ|Happy; fortunate
+たいせつ|Important; precious
+だめ|No good
+@10|nouns
+いしゃ|A medical doctor
+おかねもち|A wealthy person
+かしゅ|A singer
+さっか|A writer; novelist
+しゃちょう|A company president
+スポーツせんしゅ|An athlete
+すいえい|Swimming
+やきゅう|Baseball
+はいゆう|An actor
+べんごし|A lawyer
+かじ|A destructive fire
+かぜ|Wind
+かべ|A wall
+かみ|Paper
+くも|A cloud
+じ|A character; letter
+じしん|An earthquake
+せき|A seat
+そら|The sky
+たいよう|The sun
+はなび|Fireworks
+ふね|A boat; ship
+むし|An insect
+せいせき|A grade; academic result
+じゅぎょうりょう|Tuition
+やちん|Rent (payment)
+いなか|The countryside
+とかい|An urban area; city
+みち|A road
+みずうみ|A lake
+ネズミ|A mouse; rat
+バイク|A motorcycle
+ホームシック|Homesickness
+@10|time
+しょうらい|One's future
+むかし|The past; long ago
+@10|adverbs
+いちばん|The most; best; first
+すぐ|Immediately|すぐに
+ほんとうに|Really; truly
+よく|Well (skill or degree)
+@10|questions
+どちら|Which of two
+どっち|Which of two (casual)
+@10|counters
+せんしゅ|Player; athlete (suffix)
+やきゅうせんしゅ|A baseball player
+すいえいせんしゅ|A swimmer
+ぶ|Club (suffix)
+サッカーぶ|A soccer club
+びじゅつぶ|An art club
+@10|expressions
+どちらも|Both
+どっちも|Both (casual)

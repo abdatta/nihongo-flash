@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSessionQueueFromBuckets,
+  buildFullDeckQueue,
   pickExperimentalNewCards,
 } from './deckBuilder';
 import type { CardItem } from './types';
@@ -111,5 +112,28 @@ describe('buildSessionQueueFromBuckets', () => {
     expect(queue).toHaveLength(5);
     expect(queue.some(card => card.id === 'new-high')).toBe(true);
     expect(queue.some(card => card.id === 'new-low')).toBe(false);
+  });
+
+  it('introduces textbook material in book order instead of corpus-frequency order', () => {
+    const queue = buildSessionQueueFromBuckets({
+      strong: [], weak: [], improving: [],
+      new: [
+        { ...makeCard('later', 1000), order: 2 },
+        { ...makeCard('first', 1), order: 0 },
+        { ...makeCard('second', 10), order: 1 },
+      ],
+    }, 2);
+    expect(queue.map(card => card.id).sort()).toEqual(['first', 'second']);
+  });
+});
+
+describe('full deck queues', () => {
+  it('includes every selected item exactly once, including decks larger than 15', () => {
+    const cards = Array.from({ length: 93 }, (_, index) => makeCard(`card-${index}`));
+    const originalIds = cards.map(card => card.id);
+    const queue = buildFullDeckQueue([...cards, cards[0]]);
+    expect(queue).toHaveLength(93);
+    expect(new Set(queue.map(card => card.id))).toEqual(new Set(originalIds));
+    expect(cards.map(card => card.id)).toEqual(originalIds);
   });
 });

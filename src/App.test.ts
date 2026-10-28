@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SETTINGS } from './appConstants';
-import { filterActiveCharacterPoolByReading } from './App';
+import { filterActiveCharacterPoolByReading, getItemIdentityKey } from './App';
 import type { CardItem, SettingsState } from './types';
 
 const makeSettings = (overrides: Partial<SettingsState> = {}): SettingsState => ({
@@ -17,6 +17,15 @@ const makeKanji = (
   romaji: id,
   type: 'kanji',
   readingType,
+});
+
+describe('stats identity', () => {
+  it('keeps homophones with different senses separate while sharing progress across collection memberships', () => {
+    const title: CardItem = { id: 'title_san', char: 'さん', romaji: 'san', type: 'word', meanings: ['Mr. / Ms.'] };
+    const number: CardItem = { ...title, id: 'number_san', meanings: ['three'] };
+    expect(getItemIdentityKey(title)).not.toBe(getItemIdentityKey(number));
+    expect(getItemIdentityKey(title)).toBe(getItemIdentityKey({ ...title, memberships: [{ collectionId: 'another-book', lesson: 1, group: 'nouns' }] }));
+  });
 });
 
 describe('filterActiveCharacterPoolByReading', () => {

@@ -1,10 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, AlertTriangle, Download, Upload } from 'lucide-react';
+import { Settings, BarChart2, Edit3, BookOpen, Check, X, RefreshCw, Plus, Trash2, ArrowRight, AlertTriangle, Download, Upload, Flame, Trophy, Timer, SlidersHorizontal } from 'lucide-react';
 import { toKana } from 'wanakana';
 import RecognizePage from './pages/RecognizePage';
 import RecallPage from './pages/RecallPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
+import Modal from './components/Modal';
+import StudyScopeControls, { ContentToggle } from './components/StudyScopeControls';
+import { getAllItems, getAvailableCharacterPool, getScopeLabel, getWordPool } from './studyCatalog';
+import { isWordAnswerCorrect } from './answerChecking';
 import { DAY_IN_MS, MIN_EASE, MIN_RECENT_REVIEWS_FOR_STRONG, RECENT_RESULTS_LIMIT } from './appConstants';
 import {
   buildLocalStorageExport,
@@ -31,6 +35,7 @@ import type {
   PracticeSessionProps,
   ReviewResult,
   SettingsState,
+  SettingsViewProps,
   StudyMode,
   StatsMap,
   StatsViewProps,
@@ -54,14 +59,15 @@ import {
   HIRAGANA_HANDAKUTEN,
   HIRAGANA_YOON,
   JLPT_N5_KANJI,
+  TOBIRA_WORDS,
+  TOBIRA_KANJI,
   KATAKANA_DAKUTEN,
   KATAKANA_HANDAKUTEN,
   KATAKANA_YOON,
-  getEnabledHiraganaCards,
-  getEnabledKatakanaCards,
 } from './studyData';
 import {
   buildSessionQueueFromBuckets,
+  buildFullDeckQueue,
   shuffleCards,
 } from './deckBuilder';
 type DrawEvent = React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>;
@@ -99,12 +105,6 @@ interface StatSectionProps {
   colorClass: string;
 }
 
-interface ToggleProps {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}
-
 interface FlashcardProps {
   card: CardItem;
   direction: Direction;
@@ -112,6 +112,9 @@ interface FlashcardProps {
   onAssess: (card: CardItem, result: ReviewResult) => void;
   onPlaySound?: (effectName: FeedbackEffect) => void;
   onTriggerHaptics?: (effectName: FeedbackEffect) => void;
+  showRomaji?: boolean;
+  challenge?: boolean;
+  timeLimitSeconds?: number | null;
 }
 
 const NOISE_BUFFER_CACHE = new WeakMap<BaseAudioContext, AudioBuffer>();
@@ -144,7 +147,7 @@ export const filterActiveCharacterPoolByReading = (
   settings: SettingsState,
 ): CardItem[] => cards.filter(card => isKanjiReadingEnabled(card, settings));
 
-const getItemIdentityKey = (card: CardItem): string => `${getCardStudyMode(card)}::${card.char}::${card.romaji}`;
+export const getItemIdentityKey = (card: CardItem): string => `${getCardStudyMode(card)}::${card.id}`;
 
 const HAPTIC_PATTERNS: Record<FeedbackEffect, number | number[]> = {
   reveal: 12,
@@ -468,6 +471,24 @@ const getRecentAccuracy = (directionStats: DirectionStats): number => {
 
   const gotItCount = recentResults.reduce<number>((total, value) => total + value, 0);
   return gotItCount / recentResults.length;
+};
+
+const getDisplayedCorrectStreak = (directionStats: DirectionStats): number => {
+  const recentResults = directionStats.recentResults ?? [];
+
+  if (recentResults.length === 0) {
+    return Math.max(0, directionStats.streak);
+  }
+
+  let recentCorrectStreak = 0;
+  for (let index = recentResults.length - 1; index >= 0; index -= 1) {
+    if (recentResults[index] !== 1) {
+      break;
+    }
+    recentCorrectStreak += 1;
+  }
+
+  return Math.max(0, recentCorrectStreak, directionStats.streak);
 };
 
 const hasRecentClassificationData = (directionStats: DirectionStats): boolean => (
@@ -797,9 +818,14 @@ const getCardThemeClasses = (type: CardType, assessedState: ReviewResult | null,
 
 const formatMeanings = (card: CardItem): string => (card.meanings?.filter(Boolean) ?? []).join(', ');
 
-const normalizeRomajiResponse = (value: string): string => (
-  value.trim().toLowerCase().replace(/\s+/g, ' ')
-);
+const getCardTextFontSize = (text: string, maximumRem: number): string => {
+  const length = Array.from(text).length;
+  const size = length > 24 ? 1.75 : length > 12 ? 2.25 : length > 7 ? 2.75 : length > 4 ? 3 : maximumRem;
+  // Size against the card's content width, allowing a little room for glyphs.
+  // Short words stay together; longer phrases wrap at a readable six-kana width.
+  const charactersPerLine = Math.max(1, Math.min(length, 6));
+  return `min(${Math.min(maximumRem, size)}rem, ${92 / charactersPerLine}cqw)`;
+};
 
 interface FlashcardShellProps {
   type: CardType;
@@ -808,6 +834,8 @@ interface FlashcardShellProps {
   padded?: boolean;
   fixedHeight?: boolean;
   children: ReactNode;
+  challenge?: boolean;
+  timer?: ReactNode;
 }
 
 interface FlashcardBadgesProps {
@@ -820,6 +848,7 @@ interface FlashcardBadgesProps {
 
 interface RevealButtonProps {
   onClick: () => void;
+  challenge?: boolean;
 }
 
 interface AssessmentActionsProps {
@@ -829,6 +858,7 @@ interface AssessmentActionsProps {
   className?: string;
   missedWidthClass?: string;
   showGotIt?: boolean;
+  timedOut?: boolean;
 }
 
 const FlashcardShell = ({
@@ -838,12 +868,16 @@ const FlashcardShell = ({
   padded = true,
   fixedHeight = false,
   children,
+  challenge = false,
+  timer,
 }: FlashcardShellProps) => {
-  const paddingClass = padded ? 'p-8' : 'p-6';
+  const paddingClass = padded && !challenge ? 'p-8' : 'p-6';
   const heightClass = fixedHeight ? ' min-h-[340px]' : '';
 
   return (
-    <div className={`flex flex-col w-full max-w-sm mx-auto border ${getCardThemeClasses(type, assessedState, revealed)} rounded-3xl ${paddingClass} shadow-2xl transition-all duration-300 relative overflow-hidden${heightClass}`}>
+    <div className={`flex flex-col w-full max-w-sm mx-auto border [container-type:inline-size] ${challenge ? 'border-orange-400/40 bg-[radial-gradient(ellipse_at_top,rgba(249,115,22,0.14),transparent_65%)] bg-zinc-950 shadow-[0_0_40px_-15px_rgba(249,115,22,0.4)]' : `${getCardThemeClasses(type, assessedState, revealed)} shadow-2xl`} rounded-3xl ${paddingClass} transition-all duration-300 relative overflow-hidden${heightClass}`}>
+      {challenge && <div aria-hidden="true" className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-orange-300 to-transparent" />}
+      {timer}
       {children}
     </div>
   );
@@ -893,9 +927,14 @@ const getKanjiReadingToneClasses = (readingType?: KanjiReadingType): string => {
 interface RomajiDisplayProps {
   card: CardItem;
   className: string;
+  showRomaji?: boolean;
 }
 
-const RomajiDisplay = ({ card, className }: RomajiDisplayProps) => {
+const RomajiDisplay = ({ card, className, showRomaji = false }: RomajiDisplayProps) => {
+  className = `${className} max-w-full [overflow-wrap:anywhere]`;
+  if (card.kana) {
+    return <div className={className}><p lang="ja">{card.type === 'kanji' ? [card.kana, ...(card.acceptedAnswers ?? []).filter(answer => /[\u3040-\u30ff]/u.test(answer))].join(' ／ ') : card.kana}</p>{showRomaji && <p className="mt-2 text-base font-normal text-zinc-400">{card.romaji}</p>}</div>;
+  }
   if (card.type !== 'kanji') {
     return <p className={className}>{card.romaji}</p>;
   }
@@ -938,11 +977,12 @@ const RomajiDisplay = ({ card, className }: RomajiDisplayProps) => {
   );
 };
 
-const RevealButton = ({ onClick }: RevealButtonProps) => (
+const RevealButton = ({ onClick, challenge = false }: RevealButtonProps) => (
   <button
     onClick={onClick}
-    className="w-full rounded-xl bg-zinc-100 py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors hover:bg-zinc-200"
+    className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 text-lg font-bold shadow-md transition-colors ${challenge ? 'bg-gradient-to-r from-orange-500 to-amber-400 text-orange-950 shadow-orange-500/15 hover:from-orange-400 hover:to-amber-300' : 'bg-zinc-100 text-zinc-950 hover:bg-zinc-200'}`}
   >
+    {challenge && <Flame size={20} aria-hidden="true" />}
     Reveal
   </button>
 );
@@ -954,7 +994,13 @@ const AssessmentActions = ({
   className = '',
   missedWidthClass = 'flex-1',
   showGotIt = true,
-}: AssessmentActionsProps) => (
+  timedOut = false,
+}: AssessmentActionsProps) => timedOut ? (
+  <div className={`space-y-3 ${className}`}>
+    <p role="alert" className="text-center text-sm font-semibold text-rose-300">Time’s up · this item counts as a miss</p>
+    <button onClick={onMissed} disabled={!!assessedState} className="w-full rounded-xl bg-rose-500 py-4 text-lg font-bold text-white disabled:opacity-60">Continue</button>
+  </div>
+) : (
   <div className={`flex gap-3 ${className}`.trim()}>
     <button
       onClick={onMissed}
@@ -982,6 +1028,9 @@ const Flashcard = ({
   onAssess,
   onPlaySound,
   onTriggerHaptics,
+  showRomaji = false,
+  challenge = false,
+  timeLimitSeconds = null,
 }: FlashcardProps) => {
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState<ReviewResult | null>(null);
@@ -989,10 +1038,20 @@ const Flashcard = ({
   const [hadDrawingOnReveal, setHadDrawingOnReveal] = useState(false);
   const [typedAnswer, setTypedAnswer] = useState('');
   const [checkedAnswer, setCheckedAnswer] = useState<ReviewResult | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState(timeLimitSeconds ?? 0);
+  const [timedOut, setTimedOut] = useState(false);
+  const deadlineRef = useRef<number | null>(null);
+  const expiredRef = useRef(false);
   const clearPadRef = useRef<(() => void) | null>(null);
+  const assessmentLock = useRef(false);
+  const assessmentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (assessmentTimer.current) clearTimeout(assessmentTimer.current); }, []);
   const studyMode = getCardStudyMode(card);
   const meaningsText = formatMeanings(card);
-  const kanaPreview = typedAnswer ? toKana(typedAnswer) : '';
+  const visibleAcceptedAnswers = (card.acceptedAnswers ?? []).filter(answer => showRomaji || /[\u3040-\u30ff\u3400-\u9fff]/u.test(answer));
+  const kanaPreview = typedAnswer
+    ? (card.kana && typedAnswer.toLowerCase().replace(/\s/g, '') === card.romaji.replace(/\s/g, '') ? card.kana : toKana(typedAnswer))
+    : '';
 
   // Reset state if card changes
   useEffect(() => {
@@ -1006,6 +1065,7 @@ const Flashcard = ({
   }, [card.id]);
 
   const handleReveal = (): void => {
+    if (hasExpired()) return;
     setHadDrawingOnReveal(hasDrawn);
     setRevealed(true);
     onPlaySound?.('reveal');
@@ -1013,11 +1073,15 @@ const Flashcard = ({
   };
 
   const handleAssess = (result: ReviewResult): void => {
+    if (assessmentLock.current) return;
+    assessmentLock.current = true;
     setAssessedState(result);
-    onPlaySound?.(result);
-    onTriggerHaptics?.(result);
+    if (!timedOut && checkedAnswer === null) {
+      onPlaySound?.(result);
+      onTriggerHaptics?.(result);
+    }
     // Add a slight delay for visual feedback before telling parent to move on
-    setTimeout(() => {
+    assessmentTimer.current = setTimeout(() => {
       onAssess(card, result);
     }, 300);
   };
@@ -1025,33 +1089,87 @@ const Flashcard = ({
   const promptText = direction === 'r2k' ? card.romaji : card.char;
   const answerText = direction === 'r2k' ? card.char : card.romaji;
   const strengthMeta = getCardStrengthMeta(directionStats);
+  const expireCard = useCallback(() => {
+    if (expiredRef.current) return;
+    expiredRef.current = true;
+    setRemainingSeconds(0);
+    setTimedOut(true);
+    setRevealed(true);
+    if (studyMode === 'words' && direction === 'r2k') {
+      setCheckedAnswer('missed');
+      setAssessedState('missed');
+    }
+    onPlaySound?.('missed');
+    onTriggerHaptics?.('missed');
+  }, [studyMode, direction, onPlaySound, onTriggerHaptics]);
+
+  useEffect(() => {
+    if (!timeLimitSeconds || revealed || checkedAnswer !== null) return;
+    const deadline = performance.now() + timeLimitSeconds * 1000;
+    deadlineRef.current = deadline;
+    const interval = window.setInterval(() => {
+      const remaining = Math.max(0, (deadline - performance.now()) / 1000);
+      setRemainingSeconds(remaining);
+      if (remaining === 0) expireCard();
+    }, 50);
+    return () => { window.clearInterval(interval); deadlineRef.current = null; };
+  }, [timeLimitSeconds, revealed, checkedAnswer, expireCard]);
+
+  const hasExpired = () => {
+    if (deadlineRef.current !== null && performance.now() >= deadlineRef.current) {
+      expireCard();
+      return true;
+    }
+    return expiredRef.current;
+  };
+  const timerDisplay = timeLimitSeconds ? (
+    <div className="mb-5 w-full">
+      <div className={`mb-2 flex items-center justify-between gap-2 text-xs font-semibold ${timedOut || remainingSeconds <= 1 ? 'text-rose-300' : 'text-orange-200'}`}>
+        <span className="flex items-center gap-1.5"><Timer size={14} aria-hidden="true" />{timedOut ? 'Time’s up' : revealed ? 'Answer locked' : 'Time remaining'}</span>
+        <span role="timer" aria-label="Time remaining" aria-live="off" className="tabular-nums">{remainingSeconds.toFixed(1)}s</span>
+      </div>
+      <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-orange-950/70"><div className={`h-full rounded-full transition-[width] duration-75 ease-linear motion-reduce:transition-none ${timedOut || remainingSeconds <= 1 ? 'bg-rose-400' : 'bg-orange-300'}`} style={{ width: `${remainingSeconds / timeLimitSeconds * 100}%` }} /></div>
+    </div>
+  ) : null;
+
+  const handleCheckAnswer = () => {
+    if (hasExpired()) return;
+    const result = isWordAnswerCorrect(card, typedAnswer) ? 'gotIt' : 'missed';
+    setRevealed(true);
+    setCheckedAnswer(result);
+    setAssessedState(result);
+    onPlaySound?.(result);
+    onTriggerHaptics?.(result);
+  };
 
   if (studyMode === 'words' && direction === 'r2k') {
     return (
-      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} padded={false}>
-        <FlashcardBadges type="word" strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} className="mb-5" />
-        <div className="mb-6 text-center">
+      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} padded={false} challenge={challenge} timer={timerDisplay}>
+        <FlashcardBadges type="word" strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} className={challenge ? 'mb-3' : 'mb-5'} />
+        <div className={`${challenge ? 'mb-4' : 'mb-6'} text-center`}>
           <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-zinc-500">Meaning</p>
-          <h2 className="text-3xl font-bold leading-tight text-zinc-100">{meaningsText || 'No meaning set'}</h2>
-          <p className="mt-3 text-sm text-zinc-500">Type the romaji. Kana preview updates as you go.</p>
+          <h2 className={`${challenge ? 'text-2xl' : 'text-3xl'} font-bold leading-tight text-zinc-100 [overflow-wrap:anywhere]`}>{meaningsText || 'No meaning set'}</h2>
+          <p className="mt-3 text-sm text-zinc-500">Type kana or romaji.</p>
         </div>
         <div className="mb-4 space-y-3">
-          <input type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="text" lang="ja-Latn" placeholder="Type romaji" value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} disabled={checkedAnswer !== null} className="w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-lg text-zinc-100 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-70" />
-          <div className="rounded-2xl border border-emerald-950/60 bg-zinc-950/80 px-4 py-3">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Kana preview</p>
-            <p className="mt-2 min-h-[1.75rem] text-lg text-emerald-300">{kanaPreview || '...'}</p>
+          <input aria-label="Japanese answer" type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="done" lang="ja" autoFocus={challenge && !!timeLimitSeconds} placeholder="Type kana or romaji" value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && typedAnswer.trim() && checkedAnswer === null) { event.preventDefault(); handleCheckAnswer(); } }} disabled={checkedAnswer !== null} className={`w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-lg text-zinc-100 outline-none transition focus:ring-2 disabled:opacity-70 ${challenge ? 'focus:border-orange-400/60 focus:ring-orange-400/30' : 'focus:border-emerald-500/60 focus:ring-emerald-500/30'}`} />
+          <div className={challenge ? 'px-1' : 'rounded-2xl border border-emerald-950/60 bg-zinc-950/80 px-4 py-3'}>
+            <p className={challenge ? 'sr-only' : 'text-xs font-bold uppercase tracking-[0.24em] text-zinc-500'}>Kana preview</p>
+            <p className={`${challenge ? 'text-base text-orange-200' : 'mt-2 text-lg text-emerald-300'} min-h-[1.75rem]`}>{kanaPreview || '...'}</p>
           </div>
         </div>
         {checkedAnswer === null ? (
-          <button onClick={() => { const result = normalizeRomajiResponse(typedAnswer) === normalizeRomajiResponse(card.romaji) ? 'gotIt' : 'missed'; setRevealed(true); setCheckedAnswer(result); setAssessedState(result); onPlaySound?.(result); onTriggerHaptics?.(result); }} disabled={!typedAnswer.trim()} className="w-full rounded-xl bg-zinc-100 py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500">
+          <button onClick={handleCheckAnswer} disabled={!typedAnswer.trim()} className={`w-full rounded-xl py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:bg-none disabled:text-zinc-500 ${challenge ? 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300' : 'bg-zinc-100 hover:bg-zinc-200'}`}>
             Check Answer
           </button>
         ) : (
           <div className="animate-in fade-in duration-300 space-y-4">
             <div className={`rounded-2xl border px-4 py-4 ${checkedAnswer === 'gotIt' ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-rose-500/30 bg-rose-500/10'}`}>
-              <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-400">Correct answer</p>
-              <p className="mt-2 text-2xl font-bold text-zinc-100">{card.romaji}</p>
-              <p className="mt-2 text-lg text-emerald-300">{card.char}</p>
+              <p role={timedOut ? 'alert' : 'status'} className={`text-sm font-bold ${checkedAnswer === 'gotIt' ? 'text-emerald-300' : 'text-rose-300'}`}>{timedOut ? 'Time’s up · this item counts as a miss' : checkedAnswer === 'gotIt' ? 'Correct' : 'Not quite'}</p>
+              <p className="mt-3 text-xs font-bold uppercase tracking-[0.24em] text-zinc-400">Correct answer</p>
+              <RomajiDisplay card={card} showRomaji={showRomaji} className="mt-2 text-2xl font-bold text-zinc-100" />
+              {visibleAcceptedAnswers.length > 0 && <p className="mt-2 text-sm text-zinc-400">Also accepted: {visibleAcceptedAnswers.join(' / ')}</p>}
+              {card.char !== card.kana && <p className="mt-2 text-lg text-emerald-300">{card.char}</p>}
             </div>
             <button onClick={() => handleAssess(checkedAnswer)} className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 text-lg font-bold transition-colors ${checkedAnswer === 'gotIt' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
               {checkedAnswer === 'gotIt' ? <Check size={20} /> : <X size={20} />}
@@ -1065,28 +1183,29 @@ const Flashcard = ({
 
   if (studyMode === 'words') {
     return (
-      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} fixedHeight>
-        <div className="text-center flex-1 flex flex-col items-center">
+      <FlashcardShell type="word" assessedState={assessedState} revealed={revealed} fixedHeight challenge={challenge} timer={timerDisplay}>
+        <div className="min-w-0 text-center flex-1 flex flex-col items-center">
           <FlashcardBadges type="word" strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} />
-          <div className="flex min-h-[176px] w-full flex-1 items-center justify-center">
+          <div className="flex min-h-[176px] w-full flex-none items-center justify-center py-6">
             {!revealed ? (
-              <div className="flex flex-col items-center justify-center text-center">
-                <h2 className="text-6xl font-bold text-zinc-100 leading-none">{card.char}</h2>
+              <div className="flex min-w-0 max-w-full flex-col items-center justify-center text-center">
+                <h2 style={{ fontSize: getCardTextFontSize(card.char, 3.75) }} className="max-w-full font-bold leading-tight text-zinc-100 [overflow-wrap:anywhere]">{card.char}</h2>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
-                <h2 className="text-5xl font-bold text-zinc-100 leading-none">{card.char}</h2>
-                <RomajiDisplay card={card} className="mt-5 text-2xl font-semibold" />
-                <p className="mt-4 text-base text-zinc-300">{meaningsText}</p>
+              <div className="flex min-w-0 max-w-full flex-col items-center justify-center text-center animate-in fade-in duration-300">
+                <h2 style={{ fontSize: getCardTextFontSize(card.char, 3) }} className="max-w-full font-bold leading-tight text-zinc-100 [overflow-wrap:anywhere]">{card.char}</h2>
+                {(card.kana !== card.char || showRomaji) && <RomajiDisplay card={card} showRomaji={showRomaji} className="mt-5 text-2xl font-semibold" />}
+                <p className="mt-4 max-w-full text-base text-zinc-300 [overflow-wrap:anywhere]">{meaningsText}</p>
               </div>
             )}
           </div>
         </div>
-        <div>
+        <div className="shrink-0">
           {!revealed ? (
-            <RevealButton onClick={handleReveal} />
+            <RevealButton onClick={handleReveal} challenge={challenge} />
           ) : (
             <AssessmentActions
+              timedOut={timedOut}
               assessedState={assessedState}
               onMissed={() => handleAssess('missed')}
               onGotIt={() => handleAssess('gotIt')}
@@ -1101,17 +1220,18 @@ const Flashcard = ({
   // Specific rendering for Romaji -> Kana (includes drawing pad)
   if (direction === 'r2k') {
     return (
-      <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} padded={false}>
+      <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} padded={false} challenge={challenge} timer={timerDisplay}>
         <div className="text-center mb-4 flex flex-col items-center min-h-[110px] justify-end">
           <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} readingType={card.readingType} className="mb-auto" />
           {revealed ? (
             <div className="flex flex-col items-center animate-in slide-in-from-bottom-2 fade-in duration-300 mt-2">
-              <h2 className="text-6xl font-bold text-zinc-50 leading-none drop-shadow-md">{answerText}</h2>
+              <h2 style={{ fontSize: getCardTextFontSize(answerText, 3.75) }} className="max-w-full font-bold leading-tight text-zinc-50 drop-shadow-md [overflow-wrap:anywhere]">{answerText}</h2>
               {meaningsText && <p className="mt-3 text-center text-sm text-zinc-400">{meaningsText}</p>}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center mt-2 h-[84px]">
-              <RomajiDisplay card={card} className="text-5xl font-bold leading-none" />
+            <div className="mt-2 flex min-h-[84px] w-full flex-col items-center justify-center py-3">
+              <RomajiDisplay card={card} showRomaji={showRomaji} className={card.kana ? "text-4xl font-bold leading-tight" : "text-5xl font-bold leading-none"} />
+              {card.type === 'kanji' && meaningsText && <p className="mt-3 text-sm text-zinc-400">{meaningsText}</p>}
             </div>
           )}
         </div>
@@ -1119,15 +1239,16 @@ const Flashcard = ({
         <div className="mb-6 relative">
           <DrawingPad
             onClearRef={clearPadRef}
-            disabled={!!assessedState}
+            disabled={!!assessedState || timedOut}
             onDrawStateChange={setHasDrawn}
           />
         </div>
 
         {!revealed ? (
-          <RevealButton onClick={handleReveal} />
+          <RevealButton onClick={handleReveal} challenge={challenge} />
         ) : (
           <AssessmentActions
+            timedOut={timedOut}
             assessedState={assessedState}
             onMissed={() => handleAssess('missed')}
             onGotIt={() => handleAssess('gotIt')}
@@ -1142,19 +1263,19 @@ const Flashcard = ({
 
   // Specific rendering for Kana -> Romaji (simple flip)
   return (
-    <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} fixedHeight>
-        <div className="text-center flex-1 flex flex-col items-center">
+    <FlashcardShell type={card.type} assessedState={assessedState} revealed={revealed} fixedHeight challenge={challenge} timer={timerDisplay}>
+        <div className="min-w-0 text-center flex-1 flex flex-col items-center">
           <FlashcardBadges type={card.type} strengthClasses={strengthMeta.classes} strengthLabel={strengthMeta.label} readingType={card.readingType} />
 
-          <div className="flex min-h-[176px] w-full flex-1 items-center justify-center">
+          <div className="flex min-h-[176px] w-full flex-none items-center justify-center py-6">
             {!revealed ? (
-              <div className="flex items-center justify-center text-center">
-                <h2 className="text-8xl font-bold text-zinc-100 leading-none">{promptText}</h2>
+              <div className="flex min-w-0 max-w-full items-center justify-center text-center">
+                <h2 style={{ fontSize: getCardTextFontSize(promptText, 6) }} className="max-w-full font-bold leading-tight text-zinc-100 [overflow-wrap:anywhere]">{promptText}</h2>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
-                <h2 className="text-5xl font-bold text-zinc-100 leading-none">{promptText}</h2>
-                <RomajiDisplay card={card} className="mt-5 text-4xl font-semibold" />
+              <div className="flex min-w-0 max-w-full flex-col items-center justify-center text-center animate-in fade-in duration-300">
+                <h2 style={{ fontSize: getCardTextFontSize(promptText, 3) }} className="max-w-full font-bold leading-tight text-zinc-100 [overflow-wrap:anywhere]">{promptText}</h2>
+                <RomajiDisplay card={card} showRomaji={showRomaji} className={card.kana ? "mt-5 text-3xl font-semibold" : "mt-5 text-4xl font-semibold"} />
                 {meaningsText && (
                   <p className="mt-4 text-center text-sm text-zinc-400">{meaningsText}</p>
                 )}
@@ -1163,11 +1284,12 @@ const Flashcard = ({
           </div>
         </div>
 
-        <div>
+        <div className="shrink-0">
           {!revealed ? (
-            <RevealButton onClick={handleReveal} />
+            <RevealButton onClick={handleReveal} challenge={challenge} />
           ) : (
             <AssessmentActions
+              timedOut={timedOut}
               assessedState={assessedState}
               onMissed={() => handleAssess('missed')}
               onGotIt={() => handleAssess('gotIt')}
@@ -1180,108 +1302,106 @@ const Flashcard = ({
 };
 
 const PracticeSession = ({
-  activePool,
-  studyMode,
-  direction,
-  stats,
-  onUpdateStats,
-  onPlaySound,
-  onTriggerHaptics,
+  activePool, studyMode, direction, stats, scopeLabel, onChangeContent,
+  onUpdateStats, onPlaySound, onTriggerHaptics, showRomaji,
 }: PracticeSessionProps) => {
-  const [queue, setQueue] = useState<CardItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [sessionActive, setSessionActive] = useState(() => activePool.length > 0);
-
-  const startSession = useCallback(() => {
-    setQueue(buildSessionQueue(activePool, stats, direction, 15));
-    setCurrentIndex(0);
-    setSessionActive(true);
-  }, [activePool, stats, direction]);
-
-  // Initial auto-start if pool is available
-  useEffect(() => {
-    if (activePool.length === 0) {
-      setQueue([]);
-      setCurrentIndex(0);
-      setSessionActive(false);
-      return;
-    }
-
-    if (queue.length === 0) {
-      startSession();
-    }
-  }, [activePool, queue.length, startSession]);
-
-  const handleAssess = (card: CardItem, result: ReviewResult): void => {
-    onUpdateStats(card.id, result, direction);
-    setCurrentIndex(prev => prev + 1);
+  const [session, setSession] = useState(() => ({
+    queue: buildSessionQueue(activePool, stats, direction, 15),
+    index: 0, missed: [] as CardItem[], full: false, runId: 0,
+    timeLimitSeconds: null as number | null,
+  }));
+  const [confirmFullRun, setConfirmFullRun] = useState(false);
+  const [timedRun, setTimedRun] = useState(false);
+  const [secondsPerItem, setSecondsPerItem] = useState<number | ''>(studyMode === 'characters' ? 3 : 5);
+  const validTimeLimit = typeof secondsPerItem === 'number' && Number.isInteger(secondsPerItem) && secondsPerItem >= 1 && secondsPerItem <= 60;
+  const assessedIds = useRef(new Set<string>());
+  const complete = session.queue.length > 0 && session.index >= session.queue.length;
+  const currentCard = session.queue[session.index];
+  const startSession = (full = false, cards = activePool, timeLimitSeconds: number | null = null) => {
+    assessedIds.current = new Set();
+    setSession(previous => ({
+      queue: full ? buildFullDeckQueue(cards) : buildSessionQueue(cards, stats, direction, 15),
+      index: 0, missed: [], full, runId: previous.runId + 1,
+      timeLimitSeconds: full ? timeLimitSeconds : null,
+    }));
   };
-
-  if (activePool.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-6 text-center">
-        <div className="max-w-xs text-zinc-400">
-          <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-20" />
-          <p>{studyMode === 'words' ? 'No words available yet. Add or restore some words in Settings.' : 'No cards available. Please enable categories in Settings or add custom items.'}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const isPreparingSession = activePool.length > 0 && queue.length === 0;
-  const isSessionComplete = queue.length > 0 && currentIndex >= queue.length;
-  const currentCard = queue[currentIndex];
-
-  if (isPreparingSession) {
-    return (
-      <div className="flex-1 flex items-center justify-center p-6 text-center">
-        <div className="max-w-xs text-zinc-400">
-          <RefreshCw className="w-10 h-10 mx-auto mb-4 animate-spin text-zinc-600" />
-          <p>Preparing your session...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!sessionActive || isSessionComplete) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
-        <div className="w-24 h-24 bg-zinc-900 rounded-full flex items-center justify-center mb-6">
-          <Check className="w-12 h-12 text-emerald-500" />
-        </div>
-        <h2 className="text-3xl font-bold text-zinc-100 mb-2">Session Complete!</h2>
-        <p className="text-zinc-400 mb-8">Great job keeping up with your practice.</p>
-        <button 
-          onClick={startSession}
-          className="px-8 py-4 bg-zinc-100 text-zinc-950 rounded-full font-bold text-lg hover:bg-zinc-200 transition-colors shadow-lg flex items-center gap-2"
-        >
-          Start Next Session <ArrowRight size={20} />
-        </button>
-      </div>
-    );
-  }
-
+  const handleAssess = (card: CardItem, result: ReviewResult) => {
+    if (card.id !== currentCard?.id || assessedIds.current.has(card.id)) return;
+    assessedIds.current.add(card.id);
+    onUpdateStats(card.id, result, direction);
+    setSession(previous => ({
+      ...previous, index: previous.index + 1,
+      missed: result === 'missed' ? [...previous.missed, card] : previous.missed,
+    }));
+  };
+  const correctCount = session.index - session.missed.length;
+  const progressPercent = session.queue.length ? Math.min(100, session.index / session.queue.length * 100) : 0;
   return (
-    <div className="flex-1 overflow-y-auto pb-24 pt-6 px-4">
-      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <div className="w-full max-w-sm mb-6 flex items-center justify-between text-zinc-500 text-sm font-medium">
-           <span>Card {currentIndex + 1} of {queue.length}</span>
-           <div className="flex gap-1">
-             {queue.map((_, i) => (
-               <div key={i} className={`w-1.5 h-1.5 rounded-full ${i === currentIndex ? 'bg-zinc-100' : i < currentIndex ? 'bg-zinc-800' : 'bg-zinc-900'}`} />
-             ))}
-           </div>
-        </div>
-        <Flashcard 
-          key={currentCard.id} // Force remount on change for clean state
-          card={currentCard} 
-          direction={direction} 
-          directionStats={getScheduledDirectionStats(stats, currentCard.id, direction)}
-          onAssess={handleAssess}
-          onPlaySound={onPlaySound}
-          onTriggerHaptics={onTriggerHaptics}
-        />
+    <div className={`flex-1 overflow-y-auto px-4 pb-28 pt-5 ${session.full ? 'bg-[radial-gradient(ellipse_at_top,rgba(234,88,12,0.1),transparent_65%)]' : ''}`}>
+      <div className="mx-auto w-full max-w-sm">
+        {!session.full && <div className="mb-4 flex items-center gap-3">
+          <button onClick={() => setConfirmFullRun(true)} disabled={activePool.length === 0} aria-label="Full deck run" title="Full deck run" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/70 text-orange-300/80 transition hover:border-orange-400/40 hover:bg-orange-500/10 hover:text-orange-200 focus-visible:outline focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:opacity-30"><Flame size={23} aria-hidden="true" /></button>
+          <button onClick={onChangeContent} className="flex min-h-16 min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 text-left transition hover:border-zinc-600">
+            <span className="min-w-0"><span className="block text-sm font-semibold text-zinc-200">{scopeLabel}</span><span className="mt-1 block text-xs text-emerald-400">Change content · {activePool.length} items</span></span>
+            <SlidersHorizontal size={18} className="shrink-0 text-zinc-500" />
+          </button>
+        </div>}
+        {session.full && <section aria-label="Full deck challenge" className="mb-6 rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-500/15 via-orange-950/30 to-zinc-950 p-4 shadow-[0_8px_40px_-20px_rgba(249,115,22,0.55)]">
+          <div className="mb-4 flex items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-orange-400/30 bg-orange-500/15 text-orange-300 shadow-[0_0_24px_-8px_rgba(251,146,60,0.7)]"><Flame size={25} aria-hidden="true" /></span>
+            <div className="min-w-0 flex-1"><h2 className="text-lg font-bold tracking-tight text-orange-100">Full deck challenge</h2><p className="text-xs text-orange-200/70">{scopeLabel}</p></div>
+            <button onClick={onChangeContent} aria-label="Change challenge content" className="shrink-0 rounded-lg p-2 text-orange-200/60 hover:bg-orange-500/10 hover:text-orange-200"><SlidersHorizontal size={18} /></button>
+          </div>
+          <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold"><span className="text-orange-200/70">{complete ? 'Deck complete' : `${direction === 'k2r' ? 'Recognize' : 'Recall'}${session.timeLimitSeconds ? ` · ${session.timeLimitSeconds}s per item` : ''}`}</span><span className="tabular-nums text-orange-100">{session.index} / {session.queue.length} complete</span></div>
+          <div role="progressbar" aria-label="Challenge progress" aria-valuenow={session.index} aria-valuemin={0} aria-valuemax={session.queue.length} className="relative mb-1 h-2 overflow-hidden rounded-full bg-orange-950/80">
+            <div className="relative h-full overflow-hidden rounded-full bg-gradient-to-r from-red-600 via-orange-500 to-amber-300 transition-[width] duration-500 ease-out motion-reduce:transition-none" style={{ width: `${progressPercent}%` }}>
+              <span aria-hidden="true" className="absolute inset-y-0 right-0 w-8 rounded-full bg-gradient-to-r from-transparent via-amber-200/70 to-amber-100 shadow-[-6px_0_12px_rgba(253,186,116,0.8)]" />
+            </div>
+          </div>
+        </section>}
+        {activePool.length === 0 ? (
+          <div className="py-16 text-center text-zinc-400">
+            <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
+            <p>No items selected. Choose a set, kana group, or deck to study.</p>
+            <button onClick={onChangeContent} className="mt-6 rounded-xl bg-emerald-500 px-5 py-3 font-bold text-zinc-950">Choose content</button>
+          </div>
+        ) : complete ? (
+          <div className="space-y-5 py-6 text-center">
+            <div className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full ${session.full ? 'border border-orange-400/30 bg-orange-500/15 text-amber-300 shadow-[0_0_45px_-12px_rgba(249,115,22,0.6)]' : session.missed.length ? 'bg-amber-500/10 text-amber-300' : 'bg-emerald-500/10 text-emerald-400'}`}>{session.full ? <Trophy size={40} aria-hidden="true" /> : <Check size={40} />}</div>
+            <h2 className={`text-3xl font-bold ${session.full ? 'text-orange-100' : ''}`}>{session.full ? (session.missed.length ? 'Challenge complete' : 'Challenge conquered!') : 'Session complete'}</h2>
+            <p className="text-zinc-400">You remembered <span className="font-semibold text-zinc-100">{correctCount} of {session.queue.length}</span> items.</p>
+            {session.full && <p role="status" className={`font-semibold ${session.missed.length ? 'text-amber-300' : 'text-emerald-400'}`}>{session.missed.length ? `Not passed · ${session.missed.length} to revisit` : 'Passed · every item remembered'}</p>}
+            {session.missed.length > 0 && <div className="rounded-2xl border border-zinc-800 p-4 text-left">
+              <h3 className="mb-3 text-sm font-semibold text-zinc-300">Items to revisit</h3>
+              <ul className="space-y-3">{session.missed.map(card => <li key={card.id} className="flex flex-wrap justify-between gap-x-4 gap-y-1"><span lang="ja" className="text-xl">{card.char}</span><span className="text-sm text-zinc-400">{card.meanings?.join(', ') || card.romaji}</span></li>)}</ul>
+              <button onClick={() => startSession(false, session.missed)} className="mt-4 w-full rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold text-emerald-300">Review missed items</button>
+            </div>}
+            <button onClick={() => startSession()} className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-100 px-5 py-4 font-bold text-zinc-950">{session.full ? 'Back to regular session' : 'Start next session'}<ArrowRight size={18} /></button>
+          </div>
+        ) : currentCard ? (
+          <>
+            {!session.full && <div className="mb-3 flex items-center justify-between gap-3 text-xs font-medium text-zinc-400"><span>Regular session · {direction === 'k2r' ? 'Recognize' : 'Recall'}</span><span>Card {session.index + 1} of {session.queue.length}</span></div>}
+            {!session.full && <div role="progressbar" aria-label="Session progress" aria-valuenow={session.index} aria-valuemin={0} aria-valuemax={session.queue.length} className="mb-5 h-1 overflow-hidden rounded-full bg-zinc-800"><div className="h-full bg-emerald-400 transition-all" style={{ width: `${progressPercent}%` }} /></div>}
+            <Flashcard key={`${session.runId}:${session.index}`} card={currentCard} direction={direction} directionStats={getScheduledDirectionStats(stats, currentCard.id, direction)} onAssess={handleAssess} onPlaySound={onPlaySound} onTriggerHaptics={onTriggerHaptics} showRomaji={showRomaji} challenge={session.full} timeLimitSeconds={session.timeLimitSeconds} />
+            {session.full && <div className="mt-5 grid grid-cols-2 gap-3 text-center"><div className="rounded-xl border border-orange-400/15 bg-orange-500/5 px-3 py-3"><span className="block text-xl font-bold tabular-nums text-orange-100">{correctCount}</span><span className="text-xs text-orange-200/60">Remembered</span></div><div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-3"><span className={`block text-xl font-bold tabular-nums ${session.missed.length ? 'text-rose-300' : 'text-zinc-300'}`}>{session.missed.length}</span><span className="text-xs text-zinc-500">Missed</span></div></div>}
+          </>
+        ) : null}
+        {session.full && !complete && <button onClick={() => startSession()} className="mt-5 min-h-11 w-full text-sm text-zinc-500 hover:text-zinc-300">Back to regular session</button>}
       </div>
+      {confirmFullRun && <Modal title="Ready for a full deck run?" onClose={() => setConfirmFullRun(false)}>
+        <div className="mb-4 flex items-center gap-3 rounded-2xl border border-orange-400/25 bg-gradient-to-br from-orange-500/15 to-orange-950/20 p-4"><Flame size={28} className="shrink-0 text-orange-300" aria-hidden="true" /><div><p className="font-semibold text-orange-100">{scopeLabel}</p><p className="mt-1 text-sm text-orange-200/70">{direction === 'k2r' ? 'Recognize' : 'Recall'} · {activePool.length} items</p></div></div>
+        <p className="leading-relaxed text-zinc-300">Use this after learning the deck for a quick check of what you remember. You'll see every item once, in random order. Get them all right to pass; any misses show you what to revisit.</p>
+        {direction === 'r2k' && studyMode === 'characters' && <p className="mt-3 text-sm text-zinc-500">Handwriting is self-assessed using Got it and Missed.</p>}
+        <div className="mt-5 space-y-3">
+          <ContentToggle label="Timed run" checked={timedRun} onChange={setTimedRun} />
+          {timedRun && <div className="rounded-xl border border-orange-400/20 bg-orange-500/5 p-4">
+            <label htmlFor="full-run-seconds" className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-orange-100">Seconds per item<input id="full-run-seconds" type="number" min={1} max={60} step={1} value={secondsPerItem} onChange={e => setSecondsPerItem(e.target.value === '' ? '' : Number(e.target.value))} aria-describedby="full-run-timer-help" aria-invalid={!validTimeLimit} className="w-20 rounded-xl border border-orange-400/30 bg-zinc-950 px-3 py-2 text-base text-orange-100 outline-none focus:ring-2 focus:ring-orange-400/50" /></label>
+            <p id="full-run-timer-help" className="mt-3 text-xs leading-relaxed text-zinc-400">Reveal or check your answer before time runs out. The clock stops when the answer is shown. Timeouts count as misses.</p>
+            {!validTimeLimit && <p role="alert" className="mt-2 text-xs text-rose-300">Choose a whole number from 1 to 60 seconds.</p>}
+          </div>}
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-3"><button onClick={() => setConfirmFullRun(false)} className="rounded-xl border border-zinc-700 px-3 py-3 text-sm font-semibold">Not now</button><button disabled={timedRun && !validTimeLimit} onClick={() => { startSession(true, activePool, timedRun && validTimeLimit ? Number(secondsPerItem) : null); setConfirmFullRun(false); }} className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 px-3 py-3 text-sm font-bold text-orange-950 shadow-[0_0_24px_-10px_rgba(249,115,22,0.6)] hover:from-orange-400 hover:to-amber-300 disabled:cursor-not-allowed disabled:opacity-40"><Flame size={16} aria-hidden="true" />Start full run</button></div>
+      </Modal>}
     </div>
   );
 };
@@ -1627,7 +1747,7 @@ const StatsView = ({
                   </div>
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.24em] text-zinc-500">Streak</p>
-                    <p className="mt-2 text-2xl font-bold text-zinc-100">{selectedItem.streak}</p>
+                    <p className="mt-2 text-2xl font-bold text-zinc-100">{getDisplayedCorrectStreak(selectedItem)}</p>
                   </div>
                 </div>
               </div>
@@ -1717,23 +1837,7 @@ const SettingsView = ({
   wordItems,
   setWordItems,
   hapticsSupported,
-  showCharacterOptionsSection,
-  showKanjiReadingSettings,
-  showKanaVariationSettings,
-}: {
-  settings: SettingsState;
-  setSettings: React.Dispatch<React.SetStateAction<SettingsState>>;
-  stats: StatsMap;
-  setStats: React.Dispatch<React.SetStateAction<StatsMap>>;
-  customItems: CardItem[];
-  setCustomItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
-  wordItems: CardItem[];
-  setWordItems: React.Dispatch<React.SetStateAction<CardItem[]>>;
-  hapticsSupported: boolean;
-  showCharacterOptionsSection: boolean;
-  showKanjiReadingSettings: boolean;
-  showKanaVariationSettings: boolean;
-}) => {
+}: SettingsViewProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isEditingWords, setIsEditingWords] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1749,15 +1853,7 @@ const SettingsView = ({
   const [newWordRomaji, setNewWordRomaji] = useState('');
   const [newWordMeanings, setNewWordMeanings] = useState('');
 
-  const Toggle = ({ label, checked, onChange }: ToggleProps) => (
-    <label className="flex items-center justify-between p-4 bg-zinc-900 rounded-2xl cursor-pointer hover:bg-zinc-800/80 transition-colors mb-3">
-      <span className="text-zinc-200 font-medium">{label}</span>
-      <div className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${checked ? 'bg-emerald-500' : 'bg-zinc-700'}`}>
-        <div className={`w-4 h-4 bg-white rounded-full shadow-md transition-transform duration-300 ${checked ? 'translate-x-6' : 'translate-x-0'}`} />
-      </div>
-      <input type="checkbox" className="hidden" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
-  );
+  const Toggle = ContentToggle;
 
   const handleAddItem = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
@@ -1950,6 +2046,8 @@ const SettingsView = ({
       ...KATAKANA_YOON,
       ...JLPT_N5_KANJI,
       ...DEFAULT_WORDS,
+      ...TOBIRA_WORDS,
+      ...TOBIRA_KANJI,
       ...customItems,
       ...wordItems,
     ];
@@ -1996,7 +2094,7 @@ const SettingsView = ({
     const directionStats = source === 'local' ? conflict.localValue : conflict.importedValue;
     const statTiles = [
       { label: 'Reviews', value: String(directionStats.reviews) },
-      { label: 'Streak', value: String(directionStats.streak) },
+      { label: 'Streak', value: String(getDisplayedCorrectStreak(directionStats)) },
       { label: 'Recent', value: getRecentAccuracySummary(directionStats) },
     ];
 
@@ -2031,50 +2129,12 @@ const SettingsView = ({
         )}
       <h2 className="text-3xl font-bold text-zinc-100 mb-8">Settings</h2>
 
-      <div className="mb-8">
-        <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Study Side</h3>
-        <div className="inline-flex rounded-full border border-zinc-800 bg-zinc-900 p-1 mb-4">
-          {(['characters', 'words'] as StudyMode[]).map(mode => {
-            const isActive = settings.studyMode === mode;
-            return (
-              <button key={mode} onClick={() => setSettings(s => ({ ...s, studyMode: mode }))} className={`rounded-full px-5 py-3 text-sm font-semibold transition-colors ${isActive ? 'bg-emerald-500 text-white' : 'text-zinc-400'}`}>
-                {mode === 'characters' ? 'Characters' : 'Words'}
-              </button>
-            );
-          })}
-        </div>
-        {settings.studyMode === 'characters' && (
-          <>
-            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Active Categories</h3>
-            <Toggle label="Hiragana" checked={settings.hiragana} onChange={(val) => setSettings(s => ({ ...s, hiragana: val }))} />
-            <Toggle label="Katakana" checked={settings.katakana} onChange={(val) => setSettings(s => ({ ...s, katakana: val }))} />
-            <Toggle label="JLPT N5 Kanji" checked={settings.jlptN5Kanji} onChange={(val) => setSettings(s => ({ ...s, jlptN5Kanji: val }))} />
-            <Toggle label="Custom Kanji" checked={settings.kanji} onChange={(val) => setSettings(s => ({ ...s, kanji: val }))} />
-            {showCharacterOptionsSection && (
-              <>
-                <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 mt-6">Kanji Readings</h3>
-                {showKanjiReadingSettings && (
-                  <>
-                    <Toggle label="Onyomi" checked={settings.showOnyomi} onChange={(val) => setSettings(s => ({ ...s, showOnyomi: val }))} />
-                    <Toggle label="Kunyomi" checked={settings.showKunyomi} onChange={(val) => setSettings(s => ({ ...s, showKunyomi: val }))} />
-                  </>
-                )}
-                {showKanaVariationSettings && (
-                  <>
-                    <Toggle label="Dakuten" checked={settings.dakuten} onChange={(val) => setSettings(s => ({ ...s, dakuten: val }))} />
-                    <Toggle label="Handakuten" checked={settings.handakuten} onChange={(val) => setSettings(s => ({ ...s, handakuten: val }))} />
-                    <Toggle label="Yoon" checked={settings.yoon} onChange={(val) => setSettings(s => ({ ...s, yoon: val }))} />
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </div>
+      <div className="mb-8"><StudyScopeControls settings={settings} setSettings={setSettings} /></div>
 
       <div className="mb-8">
         <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2">Session Experience</h3>
-        <Toggle label="Practice Sounds" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
+        <Toggle label="Show romaji with textbook readings" checked={settings.showRomaji} onChange={value => setSettings(s => ({ ...s, showRomaji: value }))} />
+        <Toggle label="Sound effects" checked={settings.soundEnabled} onChange={(val) => setSettings(s => ({ ...s, soundEnabled: val }))} />
         {hapticsSupported && (
           <Toggle label="Haptic Feedback" checked={settings.hapticsEnabled} onChange={(val) => setSettings(s => ({ ...s, hapticsEnabled: val }))} />
         )}
@@ -2084,8 +2144,8 @@ const SettingsView = ({
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4 ml-2">
           <div>
-            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Words Deck</h3>
-            <p className="mt-2 text-sm text-zinc-500">Starter beginner words plus anything you add.</p>
+            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest">Personal Words Deck</h3>
+            <p className="mt-2 text-sm text-zinc-500">Starter words and items you add. Choose Personal deck above to practice these.</p>
           </div>
           <button onClick={() => setIsEditingWords(!isEditingWords)} className="text-emerald-500 text-sm font-bold hover:text-emerald-400">
             {isEditingWords ? 'Done' : 'Edit'}
@@ -2156,7 +2216,7 @@ const SettingsView = ({
           </form>
         )}
 
-        <p className="mb-4 ml-2 text-sm text-zinc-500">Custom kanji stay separate from the built-in JLPT N5 deck.</p>
+        <p className="mb-4 ml-2 text-sm text-zinc-500">Custom kanji stay separate from built-in collections.</p>
 
         <div className="space-y-2">
           {customItems.map(item => (
@@ -2385,51 +2445,19 @@ export default function App() {
   const [settings, setSettings] = useState<SettingsState>(() => loadStoredSettings());
   const [customItems, setCustomItems] = useState<CardItem[]>(() => loadStoredCardItems(CUSTOM_ITEMS_STORAGE_KEY, [], 'characters', 'kanji'));
   const [wordItems, setWordItems] = useState<CardItem[]>(() => loadStoredCardItems(WORD_ITEMS_STORAGE_KEY, DEFAULT_WORDS, 'words', 'word'));
+  const [showStudySelector, setShowStudySelector] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const hapticsSupported = useMemo(() => isLikelyHapticsSupported(), []);
   
   // Stats map: { [id]: { r2k: { gotIt, missed, streak }, k2r: { gotIt, missed, streak } } }
   const [stats, setStats] = useState<StatsMap>(() => loadStoredStats());
 
-  const allItems = useMemo<CardItem[]>(() => {
-    if (settings.studyMode === 'words') {
-      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
-    }
-
-    return [
-      ...[...BASE_HIRAGANA, ...HIRAGANA_DAKUTEN, ...HIRAGANA_HANDAKUTEN, ...HIRAGANA_YOON].map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...[...BASE_KATAKANA, ...KATAKANA_DAKUTEN, ...KATAKANA_HANDAKUTEN, ...KATAKANA_YOON].map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-      ...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })),
-    ];
-  }, [customItems, settings.studyMode, wordItems]);
-
-  const availableCharacterPool = useMemo<CardItem[]>(() => {
-    if (settings.studyMode !== 'characters') {
-      return [];
-    }
-
-    const pool: CardItem[] = [];
-    if (settings.hiragana) pool.push(...getEnabledHiraganaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
-    if (settings.katakana) pool.push(...getEnabledKatakanaCards(settings).map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
-    if (settings.jlptN5Kanji) pool.push(...JLPT_N5_KANJI.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
-    if (settings.kanji) pool.push(...customItems.map(item => ({ ...item, studyMode: 'characters' as StudyMode })));
-    return pool;
-  }, [customItems, settings]);
-
-  const showKanjiReadingSettings = useMemo(() => (
-    availableCharacterPool.some(item => item.type === 'kanji' && typeof item.readingType === 'string')
-  ), [availableCharacterPool]);
-
-  const showKanaVariationSettings = useMemo(() => (
-    availableCharacterPool.some(item => item.type === 'hiragana' || item.type === 'katakana')
-  ), [availableCharacterPool]);
-
-  const showCharacterOptionsSection = showKanjiReadingSettings || showKanaVariationSettings;
+  const allItems = useMemo(() => getAllItems(settings, customItems, wordItems), [customItems, settings.studyMode, wordItems]);
+  const availableCharacterPool = useMemo(() => getAvailableCharacterPool(settings, customItems), [settings, customItems]);
 
   const activePool = useMemo<CardItem[]>(() => {
     if (settings.studyMode === 'words') {
-      return wordItems.map(item => ({ ...item, studyMode: 'words' as StudyMode }));
+      return getWordPool(settings, wordItems);
     }
 
     return filterActiveCharacterPoolByReading(availableCharacterPool, settings);
@@ -2560,6 +2588,9 @@ export default function App() {
     activePool,
     studyMode: settings.studyMode,
     stats,
+    scopeLabel: getScopeLabel(settings),
+    onChangeContent: () => setShowStudySelector(true),
+    showRomaji: settings.showRomaji,
     onUpdateStats: updateStats,
     onPlaySound: playFeedbackSound,
     onTriggerHaptics: triggerHaptics,
@@ -2583,10 +2614,10 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 overflow-hidden relative flex flex-col bg-[#09090b]">
         {activePage === 'recall' && (
-          <RecallPage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
+          <RecallPage key={`recall:${settings.studyMode}:${activePool.map(card => card.id).join(",")}`} PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'recognize' && (
-          <RecognizePage PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
+          <RecognizePage key={`recognize:${settings.studyMode}:${activePool.map(card => card.id).join(",")}`} PracticeSessionComponent={PracticeSession} sessionProps={practiceSessionProps} />
         )}
         {activePage === 'stats' && (
           <StatsPage
@@ -2611,12 +2642,15 @@ export default function App() {
             wordItems={wordItems}
             setWordItems={setWordItems}
             hapticsSupported={hapticsSupported}
-            showCharacterOptionsSection={showCharacterOptionsSection}
-            showKanjiReadingSettings={showKanjiReadingSettings}
-            showKanaVariationSettings={showKanaVariationSettings}
           />
         )}
       </div>
+
+      {showStudySelector && <Modal title="Choose your content" onClose={() => setShowStudySelector(false)}>
+        <StudyScopeControls settings={settings} setSettings={setSettings} />
+        <div className="mt-5 rounded-xl bg-zinc-900 p-3 text-sm text-zinc-400">{activePool.length} items selected</div>
+        <button onClick={() => setShowStudySelector(false)} className="mt-4 w-full rounded-xl bg-emerald-500 px-4 py-3 font-bold text-zinc-950">Done</button>
+      </Modal>}
 
       {/* Bottom Navigation */}
       <nav className="absolute bottom-0 left-0 right-0 h-20 bg-zinc-950/90 backdrop-blur-lg border-t border-zinc-900 flex justify-around items-center px-4 pb-safe z-50">
