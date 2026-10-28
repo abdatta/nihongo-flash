@@ -1338,7 +1338,7 @@ const PracticeSession = ({
   const progressPercent = session.queue.length ? Math.min(100, session.index / session.queue.length * 100) : 0;
   return (
     <div className={`flex-1 overflow-y-auto px-4 pb-28 pt-5 ${session.full ? 'bg-[radial-gradient(ellipse_at_top,rgba(234,88,12,0.1),transparent_65%)]' : ''}`}>
-      <div className="mx-auto w-full max-w-sm">
+      <div className="mx-auto flex min-h-full w-full max-w-sm flex-col">
         {!session.full && <div className="mb-4 flex items-center gap-3">
           <button onClick={() => setConfirmFullRun(true)} disabled={activePool.length === 0} aria-label="Full deck run" title="Full deck run" className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/70 text-orange-300/80 transition hover:border-orange-400/40 hover:bg-orange-500/10 hover:text-orange-200 focus-visible:outline focus-visible:outline-orange-300 disabled:cursor-not-allowed disabled:opacity-30"><Flame size={23} aria-hidden="true" /></button>
           <button onClick={onChangeContent} className="flex min-h-16 min-w-0 flex-1 items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-3 text-left transition hover:border-zinc-600">
@@ -1359,6 +1359,9 @@ const PracticeSession = ({
             </div>
           </div>
         </section>}
+        {/* Auto margins center short cards below the scope controls. When the
+            content is taller than the viewport, they collapse for normal scrolling. */}
+        <div className="my-auto w-full shrink-0">
         {activePool.length === 0 ? (
           <div className="py-16 text-center text-zinc-400">
             <BookOpen size={48} className="mx-auto mb-4 opacity-30" />
@@ -1387,6 +1390,7 @@ const PracticeSession = ({
           </>
         ) : null}
         {session.full && !complete && <button onClick={() => startSession()} className="mt-5 min-h-11 w-full text-sm text-zinc-500 hover:text-zinc-300">Back to regular session</button>}
+        </div>
       </div>
       {confirmFullRun && <Modal title="Ready for a full deck run?" onClose={() => setConfirmFullRun(false)}>
         <div className="mb-4 flex items-center gap-3 rounded-2xl border border-orange-400/25 bg-gradient-to-br from-orange-500/15 to-orange-950/20 p-4"><Flame size={28} className="shrink-0 text-orange-300" aria-hidden="true" /><div><p className="font-semibold text-orange-100">{scopeLabel}</p><p className="mt-1 text-sm text-orange-200/70">{direction === 'k2r' ? 'Recognize' : 'Recall'} · {activePool.length} items</p></div></div>
