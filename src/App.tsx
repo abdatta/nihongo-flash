@@ -109,7 +109,8 @@ interface FlashcardProps {
   card: CardItem;
   direction: Direction;
   directionStats: DirectionStats;
-  onAssess: (card: CardItem, result: ReviewResult) => void;
+  onAssess: (card: CardItem, result: ReviewResult, keepAnswerFocused?: boolean) => void;
+  focusAnswer?: boolean;
   onPlaySound?: (effectName: FeedbackEffect) => void;
   onTriggerHaptics?: (effectName: FeedbackEffect) => void;
   showRomaji?: boolean;
@@ -1031,6 +1032,7 @@ const Flashcard = ({
   showRomaji = false,
   challenge = false,
   timeLimitSeconds = null,
+  focusAnswer = false,
 }: FlashcardProps) => {
   const [revealed, setRevealed] = useState(false);
   const [assessedState, setAssessedState] = useState<ReviewResult | null>(null);
@@ -1043,6 +1045,7 @@ const Flashcard = ({
   const deadlineRef = useRef<number | null>(null);
   const expiredRef = useRef(false);
   const clearPadRef = useRef<(() => void) | null>(null);
+  const answerInputRef = useRef<HTMLInputElement>(null);
   const assessmentLock = useRef(false);
   const assessmentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (assessmentTimer.current) clearTimeout(assessmentTimer.current); }, []);
@@ -1076,6 +1079,12 @@ const Flashcard = ({
     if (assessmentLock.current) return;
     assessmentLock.current = true;
     setAssessedState(result);
+    // Typed answers already showed feedback at check time. Advance immediately
+    // so the next keystrokes land in the next card, including on full deck runs.
+    if (checkedAnswer !== null) {
+      onAssess(card, result, document.activeElement === answerInputRef.current);
+      return;
+    }
     if (!timedOut && checkedAnswer === null) {
       onPlaySound?.(result);
       onTriggerHaptics?.(result);
@@ -1133,6 +1142,7 @@ const Flashcard = ({
   ) : null;
 
   const handleCheckAnswer = () => {
+    if (checkedAnswer !== null || !typedAnswer.trim()) return;
     if (hasExpired()) return;
     const result = isWordAnswerCorrect(card, typedAnswer) ? 'gotIt' : 'missed';
     setRevealed(true);
@@ -1140,6 +1150,23 @@ const Flashcard = ({
     setAssessedState(result);
     onPlaySound?.(result);
     onTriggerHaptics?.(result);
+  };
+
+  const handleAnswerKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Enter used to confirm Japanese IME composition must not check or advance.
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (checkedAnswer === null) {
+      handleCheckAnswer();
+    } else {
+      handleAssess(checkedAnswer);
+    }
+  };
+
+  const preserveAnswerFocus = (event: React.PointerEvent<HTMLButtonElement>) => {
+    // Keep an already-open mobile keyboard through Check / Continue taps.
+    if (document.activeElement === answerInputRef.current) event.preventDefault();
   };
 
   if (studyMode === 'words' && direction === 'r2k') {
@@ -1152,14 +1179,34 @@ const Flashcard = ({
           <p className="mt-3 text-sm text-zinc-500">Type kana or romaji.</p>
         </div>
         <div className="mb-4 space-y-3">
-          <input aria-label="Japanese answer" type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="text" enterKeyHint="done" lang="ja" autoFocus={challenge && !!timeLimitSeconds} placeholder="Type kana or romaji" value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && typedAnswer.trim() && checkedAnswer === null) { event.preventDefault(); handleCheckAnswer(); } }} disabled={checkedAnswer !== null} className={`w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-lg text-zinc-100 outline-none transition focus:ring-2 disabled:opacity-70 ${challenge ? 'focus:border-orange-400/60 focus:ring-orange-400/30' : 'focus:border-emerald-500/60 focus:ring-emerald-500/30'}`} />
+          <input
+            ref={answerInputRef}
+            aria-label="Japanese answer"
+            aria-describedby="recall-keyboard-help"
+            type="text"
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            inputMode="text"
+            enterKeyHint={checkedAnswer === null ? 'done' : 'next'}
+            lang="ja"
+            autoFocus={focusAnswer || window.matchMedia('(hover: hover) and (pointer: fine)').matches}
+            placeholder="Type kana or romaji"
+            value={typedAnswer}
+            onChange={(event) => setTypedAnswer(event.target.value)}
+            onKeyDown={handleAnswerKeyDown}
+            readOnly={checkedAnswer !== null}
+            className={`w-full rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-4 text-lg text-zinc-100 outline-none transition focus:ring-2 read-only:opacity-70 ${challenge ? 'focus:border-orange-400/60 focus:ring-orange-400/30' : 'focus:border-emerald-500/60 focus:ring-emerald-500/30'}`}
+          />
+          <p id="recall-keyboard-help" className="text-center text-xs text-zinc-500">{checkedAnswer === null ? 'Enter to check · Enter again for next card' : 'Enter for next card'}</p>
           <div className={challenge ? 'px-1' : 'rounded-2xl border border-emerald-950/60 bg-zinc-950/80 px-4 py-3'}>
             <p className={challenge ? 'sr-only' : 'text-xs font-bold uppercase tracking-[0.24em] text-zinc-500'}>Kana preview</p>
             <p className={`${challenge ? 'text-base text-orange-200' : 'mt-2 text-lg text-emerald-300'} min-h-[1.75rem]`}>{kanaPreview || '...'}</p>
           </div>
         </div>
         {checkedAnswer === null ? (
-          <button onClick={handleCheckAnswer} disabled={!typedAnswer.trim()} className={`w-full rounded-xl py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:bg-none disabled:text-zinc-500 ${challenge ? 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300' : 'bg-zinc-100 hover:bg-zinc-200'}`}>
+          <button onPointerDown={preserveAnswerFocus} onClick={handleCheckAnswer} disabled={!typedAnswer.trim()} className={`w-full rounded-xl py-4 text-lg font-bold text-zinc-950 shadow-md transition-colors disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:bg-none disabled:text-zinc-500 ${challenge ? 'bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300' : 'bg-zinc-100 hover:bg-zinc-200'}`}>
             Check Answer
           </button>
         ) : (
@@ -1171,7 +1218,7 @@ const Flashcard = ({
               {visibleAcceptedAnswers.length > 0 && <p className="mt-2 text-sm text-zinc-400">Also accepted: {visibleAcceptedAnswers.join(' / ')}</p>}
               {card.char !== card.kana && <p className="mt-2 text-lg text-emerald-300">{card.char}</p>}
             </div>
-            <button onClick={() => handleAssess(checkedAnswer)} className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 text-lg font-bold transition-colors ${checkedAnswer === 'gotIt' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
+            <button onPointerDown={preserveAnswerFocus} onClick={() => handleAssess(checkedAnswer)} className={`flex w-full items-center justify-center gap-2 rounded-xl py-4 text-lg font-bold transition-colors ${checkedAnswer === 'gotIt' ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
               {checkedAnswer === 'gotIt' ? <Check size={20} /> : <X size={20} />}
               Continue
             </button>
@@ -1315,19 +1362,22 @@ const PracticeSession = ({
   const [secondsPerItem, setSecondsPerItem] = useState<number | ''>(studyMode === 'characters' ? 3 : 5);
   const validTimeLimit = typeof secondsPerItem === 'number' && Number.isInteger(secondsPerItem) && secondsPerItem >= 1 && secondsPerItem <= 60;
   const assessedIds = useRef(new Set<string>());
+  const focusAnswerRef = useRef(false);
   const complete = session.queue.length > 0 && session.index >= session.queue.length;
   const currentCard = session.queue[session.index];
   const startSession = (full = false, cards = activePool, timeLimitSeconds: number | null = null) => {
     assessedIds.current = new Set();
+    focusAnswerRef.current = false;
     setSession(previous => ({
       queue: full ? buildFullDeckQueue(cards) : buildSessionQueue(cards, stats, direction, 15),
       index: 0, missed: [], full, runId: previous.runId + 1,
       timeLimitSeconds: full ? timeLimitSeconds : null,
     }));
   };
-  const handleAssess = (card: CardItem, result: ReviewResult) => {
+  const handleAssess = (card: CardItem, result: ReviewResult, keepAnswerFocused = false) => {
     if (card.id !== currentCard?.id || assessedIds.current.has(card.id)) return;
     assessedIds.current.add(card.id);
+    focusAnswerRef.current = keepAnswerFocused;
     onUpdateStats(card.id, result, direction);
     setSession(previous => ({
       ...previous, index: previous.index + 1,
@@ -1385,7 +1435,7 @@ const PracticeSession = ({
           <>
             {!session.full && <div className="mb-3 flex items-center justify-between gap-3 text-xs font-medium text-zinc-400"><span>Regular session · {direction === 'k2r' ? 'Recognize' : 'Recall'}</span><span>Card {session.index + 1} of {session.queue.length}</span></div>}
             {!session.full && <div role="progressbar" aria-label="Session progress" aria-valuenow={session.index} aria-valuemin={0} aria-valuemax={session.queue.length} className="mb-5 h-1 overflow-hidden rounded-full bg-zinc-800"><div className="h-full bg-emerald-400 transition-all" style={{ width: `${progressPercent}%` }} /></div>}
-            <Flashcard key={`${session.runId}:${session.index}`} card={currentCard} direction={direction} directionStats={getScheduledDirectionStats(stats, currentCard.id, direction)} onAssess={handleAssess} onPlaySound={onPlaySound} onTriggerHaptics={onTriggerHaptics} showRomaji={showRomaji} challenge={session.full} timeLimitSeconds={session.timeLimitSeconds} />
+            <Flashcard key={`${session.runId}:${session.index}`} card={currentCard} direction={direction} directionStats={getScheduledDirectionStats(stats, currentCard.id, direction)} onAssess={handleAssess} onPlaySound={onPlaySound} onTriggerHaptics={onTriggerHaptics} showRomaji={showRomaji} challenge={session.full} timeLimitSeconds={session.timeLimitSeconds} focusAnswer={focusAnswerRef.current} />
             {session.full && <div className="mt-5 grid grid-cols-2 gap-3 text-center"><div className="rounded-xl border border-orange-400/15 bg-orange-500/5 px-3 py-3"><span className="block text-xl font-bold tabular-nums text-orange-100">{correctCount}</span><span className="text-xs text-orange-200/60">Remembered</span></div><div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-3"><span className={`block text-xl font-bold tabular-nums ${session.missed.length ? 'text-rose-300' : 'text-zinc-300'}`}>{session.missed.length}</span><span className="text-xs text-zinc-500">Missed</span></div></div>}
           </>
         ) : null}
